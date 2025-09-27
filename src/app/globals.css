@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+:root {
+    /* DentaBase Color Palette - Using exact HSL values from serene-smile-app */
+    --background: 330 100% 99%; /* #fff6ff */
+    --foreground: 258 46% 25%; /* #573d82 */
+
+    --card: 0 0% 100%; /* #ffffff */
+    --card-foreground: 258 46% 25%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 258 46% 25%;
+
+    --primary: 258 46% 25%; /* #573d82 */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 258 22% 65%; /* #9b89b3 */
+    --secondary-foreground: 258 46% 25%;
+
+    --muted: 330 100% 99%;
+    --muted-foreground: 258 22% 50%;
+
+    --accent: 36 60% 78%; /* #e8d5b5 */
+    --accent-foreground: 258 46% 25%;
+
+    --warm: 45 75% 55%; /* #dfaf38 */
+    --warm-foreground: 258 46% 25%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 258 22% 90%;
+    --input: 258 22% 95%;
+    --ring: 258 46% 25%;
+
+    --radius: 0.5rem;
+
+    /* Sidebar variables */
+    --sidebar-background: 0 0% 100%; /* white */
+    --sidebar-foreground: 258 46% 25%;
+    --sidebar-primary: 258 46% 25%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 258 46% 25%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 258 22% 90%;
+    --sidebar-ring: 258 46% 25%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
