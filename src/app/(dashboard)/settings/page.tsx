@@ -12,7 +12,8 @@ import {
   Shield,
   Bell,
   Database,
-  ChevronRight 
+  ChevronRight,
+  HelpCircle 
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -22,86 +23,85 @@ interface SettingsCategory {
   description: string;
   items: string[];
   route: string;
-  adminOnly: boolean;
   priority?: boolean;
 }
 
 export default function SettingsPage() {
   const router = useRouter();
   
-  // Admin-specific settings categories
-  const adminSettings: SettingsCategory[] = [
+  // System management settings categories
+  const systemSettings: SettingsCategory[] = [
     {
       icon: Users,
       title: "Account Management",
       description: "Create and manage dentist and staff accounts",
       items: ["Create Dentist Account", "Create Staff Account", "Manage User Roles", "User Permissions"],
       route: "/settings/accounts",
-      adminOnly: true,
       priority: true
     },
     {
       icon: Building2,
-      title: "Practice Management",
+      title: "Clinic Operations",
       description: "Clinic information and operational settings",
       items: ["Clinic Information", "Working Hours", "Appointment Slots", "Service Types"],
-      route: "/settings/practice",
-      adminOnly: true
+      route: "/settings/practice"
     },
     {
       icon: SettingsIcon,
       title: "System Configuration",
       description: "System-wide settings and configurations",
       items: ["Database Backup", "Email Settings", "SMS Configuration", "Security Policies"],
-      route: "/settings/system",
-      adminOnly: true
+      route: "/settings/system"
     }
   ];
 
-  // General settings for all users
-  const generalSettings: SettingsCategory[] = [
+  // Personal settings for all users
+  const personalSettings: SettingsCategory[] = [
     {
       icon: User,
-      title: "Personal Settings",
+      title: "My Profile",
       description: "Your profile and account preferences",
-      items: ["Profile Information", "Change Password", "Notification Preferences", "Display Settings"],
-      route: "/settings/profile",
-      adminOnly: false
+      items: ["Profile Picture", "Personal Information", "Contact Information", "Additional Details"],
+      route: "/settings/profile"
     },
     {
       icon: Bell,
       title: "Notifications",
       description: "Configure your notification preferences",
       items: ["Email Notifications", "SMS Alerts", "Desktop Notifications", "Appointment Reminders"],
-      route: "/settings/notifications",
-      adminOnly: false
+      route: "/settings/notifications"
     },
     {
       icon: Shield,
       title: "Privacy & Security",
       description: "Security settings and privacy controls",
       items: ["Two-Factor Authentication", "Login Sessions", "Access Logs", "Data Privacy"],
-      route: "/settings/security",
-      adminOnly: false
+      route: "/settings/security"
+    },
+    {
+      icon: HelpCircle,
+      title: "Help & Support",
+      description: "Get assistance and access documentation",
+      items: ["User Guide", "FAQ", "Contact Support", "System Status"],
+      route: "/settings/help"
     }
   ];
 
-  // Analytics and reports (admin only)
+  // Analytics and reports settings
   const analyticsSettings: SettingsCategory[] = [
     {
       icon: BarChart3,
       title: "Reports & Analytics",
       description: "System reports and user activity analytics",
       items: ["User Activity Logs", "System Usage Reports", "Export Data", "Performance Metrics"],
-      route: "/settings/reports",
-      adminOnly: true
+      route: "/settings/reports"
     }
   ];
 
   // For UI focus, display all settings categories
   const allSettings = [
-    ...adminSettings,
-    ...generalSettings,
+    ...systemSettings,
+    ...personalSettings,
     ...analyticsSettings
   ];
 
@@ -122,7 +122,7 @@ export default function SettingsPage() {
       {/* Settings Categories Grid */}
       <div className="space-y-8">
         
-        {/* ADMIN SECTION - Show only for admin users when auth is implemented */}
+        {/* SYSTEM MANAGEMENT SECTION */}
         <div>
           <div className="mb-4">
             <h3 className="text-lg font-semibold text-[hsl(258_46%_25%)] flex items-center gap-2">
@@ -133,8 +133,17 @@ export default function SettingsPage() {
               System management and administrative controls
             </p>
           </div>
+
+          {/* Administrator Access Badge */}
+          <div className="bg-gradient-to-r from-[hsl(258_46%_25%)] to-[hsl(258_46%_30%)] text-white px-4 py-2 rounded-lg mb-6">
+            <div className="flex items-center space-x-2">
+              <Shield className="h-4 w-4" />
+              <span className="text-sm font-medium">Administrator Access</span>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {adminSettings.map((category, index) => (
+            {systemSettings.map((category, index) => (
               <Card 
                 key={`admin-${index}`} 
                 className="bg-white hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-[hsl(258_46%_25%)] hover:border-l-[hsl(258_46%_20%)]"
@@ -170,28 +179,13 @@ export default function SettingsPage() {
                       </div>
                     )}
                   </div>
-                  
-                  <div className="mt-4 pt-3 border-t border-[hsl(258_22%_90%)]">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="w-full justify-between text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.05)]"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCardClick(category.route);
-                      }}
-                    >
-                      <span>Configure</span>
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
                 </CardContent>
               </Card>
             ))}
           </div>
         </div>
 
-        {/* GENERAL SECTION - Show for all users */}
+        {/* PERSONAL SECTION */}
         <div>
           <div className="mb-4">
             <h3 className="text-lg font-semibold text-[hsl(258_46%_25%)] flex items-center gap-2">
@@ -203,7 +197,7 @@ export default function SettingsPage() {
             </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {generalSettings.map((category, index) => (
+            {personalSettings.map((category, index) => (
               <Card 
                 key={`general-${index}`} 
                 className="bg-white hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-transparent hover:border-l-[hsl(258_46%_25%)]"
@@ -212,7 +206,7 @@ export default function SettingsPage() {
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center space-x-3">
-                      <div className="h-12 w-12 rounded-xl flex items-center justify-center bg-[hsl(258_46%_25%/0.1)] text-[hsl(258_46%_25%)]">
+                      <div className="h-12 w-12 rounded-xl flex items-center justify-center bg-[hsl(258_46%_25%)] text-white">
                         <category.icon className="h-6 w-6" />
                       </div>
                       <div className="flex-1">
@@ -239,28 +233,13 @@ export default function SettingsPage() {
                       </div>
                     )}
                   </div>
-                  
-                  <div className="mt-4 pt-3 border-t border-[hsl(258_22%_90%)]">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="w-full justify-between text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.05)]"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCardClick(category.route);
-                      }}
-                    >
-                      <span>Configure</span>
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
                 </CardContent>
               </Card>
             ))}
           </div>
         </div>
 
-        {/* ANALYTICS SECTION - Show only for admin users when auth is implemented */}
+        {/* ANALYTICS SECTION */}
         <div>
           <div className="mb-4">
             <h3 className="text-lg font-semibold text-[hsl(258_46%_25%)] flex items-center gap-2">
@@ -281,7 +260,7 @@ export default function SettingsPage() {
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center space-x-3">
-                      <div className="h-12 w-12 rounded-xl flex items-center justify-center bg-[hsl(258_46%_25%/0.1)] text-[hsl(258_46%_25%)]">
+                      <div className="h-12 w-12 rounded-xl flex items-center justify-center bg-[hsl(258_46%_25%)] text-white">
                         <category.icon className="h-6 w-6" />
                       </div>
                       <div className="flex-1">
@@ -307,21 +286,6 @@ export default function SettingsPage() {
                         +{category.items.length - 3} more options
                       </div>
                     )}
-                  </div>
-                  
-                  <div className="mt-4 pt-3 border-t border-[hsl(258_22%_90%)]">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="w-full justify-between text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.05)]"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCardClick(category.route);
-                      }}
-                    >
-                      <span>Configure</span>
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
                   </div>
                 </CardContent>
               </Card>

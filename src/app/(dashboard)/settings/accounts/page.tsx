@@ -20,7 +20,6 @@ import {
   EyeOff
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/contexts/AuthContext";
 
 type UserRole = 'dentist' | 'staff';
 
@@ -47,7 +46,6 @@ interface ExistingUser {
 
 export default function AccountManagementPage() {
   const router = useRouter();
-  const { userProfile } = useAuth();
   const [activeTab, setActiveTab] = useState<'create' | 'manage'>('create');
   const [createTab, setCreateTab] = useState<'dentist' | 'staff'>('dentist');
   const [showPassword, setShowPassword] = useState(false);
@@ -86,12 +84,6 @@ export default function AccountManagementPage() {
       created_at: '2024-09-15T14:30:00Z'
     }
   ]);
-
-  // Redirect if not admin
-  if (userProfile?.role !== 'admin') {
-    router.push('/settings');
-    return null;
-  }
 
   const handleInputChange = (field: keyof NewUser, value: string) => {
     setNewUser(prev => ({ ...prev, [field]: value }));
@@ -159,13 +151,7 @@ export default function AccountManagementPage() {
         <p className="text-[hsl(258_22%_50%)]">Create and manage dentist and staff accounts</p>
       </div>
 
-      {/* Admin Badge */}
-      <div className="bg-gradient-to-r from-[hsl(258_46%_25%)] to-[hsl(258_46%_30%)] text-white px-4 py-2 rounded-lg">
-        <div className="flex items-center space-x-2">
-          <Shield className="h-4 w-4" />
-          <span className="text-sm font-medium">Administrator Privileges Required</span>
-        </div>
-      </div>
+
 
       {/* Tab Navigation */}
       <div className="border-b border-[hsl(258_22%_90%)]">
