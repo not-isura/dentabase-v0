@@ -11,6 +11,11 @@
   --popover: 0 0% 100%;
   --popover-foreground: 258 46% 25%;
 
+@keyframes fadeDown {
+  0% { opacity: 0; transform: translateY(-6px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
   --primary: 258 46% 25%; /* #573d82 */
   --primary-foreground: 0 0% 100%;
 
@@ -54,4 +59,28 @@ body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Utility to make action buttons consistent width across table and modal */
+.action-btn-w {
+  min-width: 6.5rem; /* compact, consistent width for two buttons per row */
+  justify-content: center;
+}
+
+/* Compact variant for action buttons (smaller font & padding) */
+.action-btn-compact {
+  font-size: 0.8125rem; /* ~13px */
+  height: 2rem; /* ~h-8 for consistency */
+  padding-top: 0.375rem; /* 6px */
+  padding-bottom: 0.375rem;
+  padding-left: 0.5rem; /* 8px */
+  padding-right: 0.5rem;
+}
+
+/* Uniform width for status badges without altering table layout */
+.status-badge {
+  min-width: 5rem; /* 80px, tighter but fits typical labels */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
