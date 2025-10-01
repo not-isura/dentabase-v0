@@ -658,7 +658,8 @@ export default function AdminAppointmentsPage() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <CardTitle className="flex items-center text-[hsl(258_46%_25%)] mb-1">
-                  <CalendarIcon className="mr-2 h-5 w-5" />
+                  {/* <CalendarIcon className="mr-2 h-5 w-5" /> */}
+                  <FileText className="mr-2 h-5 w-5" />
                   List of Appointments
                 </CardTitle>
                 <CardDescription className="text-[hsl(258_22%_50%)]">Central hub for managing clinic appointments</CardDescription>
