@@ -279,8 +279,6 @@ export default function AdminAppointmentsPage() {
   const [appointments, setAppointments] = useState<Appointment[]>(sampleAppointments);
   const [doctors] = useState<Doctor[]>(sampleDoctors);
   const [activeTab, setActiveTab] = useState<"overall" | "doctors" | "calendar">("overall");
-  const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
-  const [doctorTab, setDoctorTab] = useState<"appointments" | "calendar">("appointments");
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterDoctor, setFilterDoctor] = useState<string>("all");
@@ -289,9 +287,15 @@ export default function AdminAppointmentsPage() {
   const minDate = new Date(demoToday.getFullYear(), demoToday.getMonth(), demoToday.getDate());
   const [selectedStart, setSelectedStart] = useState<Date | null>(minDate);
   const [selectedEnd, setSelectedEnd] = useState<Date | null>(null);
+  // When true and only selectedStart is set, treat as date >= selectedStart (upcoming)
+  const [fromStart, setFromStart] = useState<boolean>(false);
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date(minDate.getFullYear(), minDate.getMonth(), 1));
   const [isDateFilterOpen, setIsDateFilterOpen] = useState(false);
   const popRef = useRef<HTMLDivElement | null>(null);
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const [showListBottomFade, setShowListBottomFade] = useState(false);
+  const [showListTopShadow, setShowListTopShadow] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   // Close on outside click/ESC
   useEffect(() => {
@@ -312,6 +316,36 @@ export default function AdminAppointmentsPage() {
       document.removeEventListener("keydown", onKey);
     };
   }, [isDateFilterOpen]);
+
+  // Manage bottom fade visibility for the appointments list
+  useEffect(() => {
+    const updateFade = () => {
+      const el = listScrollRef.current;
+      if (!el) {
+        setShowListBottomFade(false);
+        setShowListTopShadow(false);
+        return;
+      }
+      const canScroll = el.scrollHeight > el.clientHeight + 1;
+      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+      const atTop = el.scrollTop <= 1;
+      setShowListBottomFade(canScroll && !atBottom);
+      setShowListTopShadow(canScroll && !atTop);
+    };
+
+    // Run after render to measure
+    const rAF = requestAnimationFrame(updateFade);
+    const el = listScrollRef.current;
+    if (el) {
+      el.addEventListener("scroll", updateFade);
+    }
+    window.addEventListener("resize", updateFade);
+    return () => {
+      cancelAnimationFrame(rAF);
+      if (el) el.removeEventListener("scroll", updateFade);
+      window.removeEventListener("resize", updateFade);
+    };
+  }, [appointments, activeTab, selectedStart, selectedEnd, filterDoctor, filterStatus, searchTerm]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
   const [isNewAppointmentOpen, setIsNewAppointmentOpen] = useState(false);
@@ -359,6 +393,16 @@ export default function AdminAppointmentsPage() {
   const todayAppointments = appointments.filter(apt => apt.date === demoTodayStr);
   const pendingApprovals = appointments.filter(apt => apt.status === "pending").length;
   const completedThisWeek = appointments.filter(apt => apt.status === "completed").length;
+
+  // Determine if any filters deviate from defaults
+  // Defaults: Date = today (single day), Doctor = all, Status = all, fromStart = false
+  const hasNonDefaultFilters = !(
+    filterDoctor === "all" &&
+    filterStatus === "all" &&
+    selectedEnd === null &&
+    fromStart === false &&
+    !!selectedStart && isSameDay(selectedStart, minDate)
+  );
 
   const handleStatusChange = (appointmentId: string, newStatus: Appointment["status"], reason?: string) => {
     setAppointments(prev => 
@@ -447,7 +491,11 @@ export default function AdminAppointmentsPage() {
       filtered = filtered.filter(apt => apt.date >= startStr && apt.date <= endStr);
     } else if (selectedStart) {
       const startStr = toYMD(selectedStart);
-      filtered = filtered.filter(apt => apt.date === startStr);
+      if (fromStart) {
+        filtered = filtered.filter(apt => apt.date >= startStr);
+      } else {
+        filtered = filtered.filter(apt => apt.date === startStr);
+      }
     }
 
     // Doctor filtering
@@ -471,6 +519,38 @@ export default function AdminAppointmentsPage() {
     return filtered;
   };
 
+  // Navigation helpers from Doctor List to Overall with filters
+  const goToOverallWithDoctorToday = (doctorId: string) => {
+    setFilterDoctor(doctorId);
+    setSelectedStart(minDate);
+    setSelectedEnd(null);
+    setFromStart(false);
+    setActiveTab("overall");
+  };
+
+  const goToOverallWithDoctorUpcoming = (doctorId: string) => {
+    setFilterDoctor(doctorId);
+    // Upcoming = from today to one year ahead (inclusive)
+    const oneYearAhead = new Date(minDate.getFullYear() + 1, minDate.getMonth(), minDate.getDate());
+    setSelectedStart(minDate);
+    setSelectedEnd(oneYearAhead);
+    setFromStart(false);
+    setActiveTab("overall");
+  };
+
+  // Reset Filters: Date -> today, Doctor -> all, Status -> all
+  const handleResetFilters = () => {
+    setIsResetting(true);
+    setFilterDoctor("all");
+    setFilterStatus("all");
+    setSelectedStart(minDate);
+    setSelectedEnd(null);
+    setFromStart(false);
+    setIsDateFilterOpen(false);
+    // brief visual feedback
+    setTimeout(() => setIsResetting(false), 180);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -479,14 +559,6 @@ export default function AdminAppointmentsPage() {
           <h2 className="text-2xl font-bold text-[hsl(258_46%_25%)]">Appointments</h2>
           <p className="text-[hsl(258_22%_50%)]">Manage your dental appointments</p>
         </div>
-        <Button 
-          style={{ backgroundColor: 'hsl(258, 46%, 25%)', color: 'white' }}
-          className="hover:opacity-90"
-          onClick={() => setIsNewAppointmentOpen(true)}
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          New Appointment
-        </Button>
       </div>
 
       {/* Quick Stats Header */}
@@ -518,109 +590,94 @@ export default function AdminAppointmentsPage() {
       </div>
 
       {/* Tab Navigation */}
-      {!selectedDoctor && (
+      {(
         <div className="border-b border-gray-200">
-          <nav className="flex space-x-8">
+          <nav
+            role="tablist"
+            aria-label="Appointments navigation"
+            className="flex gap-2 md:gap-3 py-0"
+          >
             <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "overall"}
+              aria-controls="tab-overall-panel"
+              id="tab-overall"
               onClick={() => setActiveTab("overall")}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              className={`inline-flex items-center gap-2 px-4 py-2 -mb-[1px] rounded-t-md text-sm font-medium cursor-pointer select-none transition-colors transition-transform duration-200 ease-in-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 ${
                 activeTab === "overall"
-                  ? "border-purple-500 text-purple-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                  ? "bg-[hsl(258_46%_25%)] text-white border-b-2 border-white/90"
+                  : "text-gray-700 hover:text-purple-800 hover:bg-purple-100"
               }`}
             >
-              Overall Appointments
+              <FileText className="h-4 w-4" />
+              <span>Appointments</span>
             </button>
             <button
-              onClick={() => setActiveTab("doctors")}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "doctors"
-                  ? "border-purple-500 text-purple-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
-            >
-              Doctor List
-            </button>
-            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "calendar"}
+              aria-controls="tab-calendar-panel"
+              id="tab-calendar"
               onClick={() => setActiveTab("calendar")}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              className={`inline-flex items-center gap-2 px-4 py-2 -mb-[1px] rounded-t-md text-sm font-medium cursor-pointer select-none transition-colors transition-transform duration-200 ease-in-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 ${
                 activeTab === "calendar"
-                  ? "border-purple-500 text-purple-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                  ? "bg-[hsl(258_46%_25%)] text-white border-b-2 border-white/90"
+                  : "text-gray-700 hover:text-purple-800 hover:bg-purple-100"
               }`}
             >
-              Overall Calendar View
+              <CalendarIcon className="h-4 w-4" />
+              <span>Calendar</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "doctors"}
+              aria-controls="tab-doctors-panel"
+              id="tab-doctors"
+              onClick={() => setActiveTab("doctors")}
+              className={`inline-flex items-center gap-2 px-4 py-2 -mb-[1px] rounded-t-md text-sm font-medium cursor-pointer select-none transition-colors transition-transform duration-200 ease-in-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 ${
+                activeTab === "doctors"
+                  ? "bg-[hsl(258_46%_25%)] text-white border-b-2 border-white/90"
+                  : "text-gray-700 hover:text-purple-800 hover:bg-purple-100"
+              }`}
+            >
+              <Users className="h-4 w-4" />
+              <span>Doctors</span>
             </button>
           </nav>
         </div>
-      )}
+  )}
 
-      {/* Doctor View Header */}
-      {selectedDoctor && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSelectedDoctor(null)}
-              >
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back to Doctor List
-              </Button>
-              <div>
-                <h3 className="text-xl font-semibold text-gray-900">{selectedDoctor.name}</h3>
-                <p className="text-gray-500">{selectedDoctor.specialty}</p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="border-b border-gray-200">
-            <nav className="flex space-x-8">
-              <button
-                onClick={() => setDoctorTab("appointments")}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                  doctorTab === "appointments"
-                    ? "border-purple-500 text-purple-600"
-                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
-              >
-                Today's Appointments
-              </button>
-              <button
-                onClick={() => setDoctorTab("calendar")}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                  doctorTab === "calendar"
-                    ? "border-purple-500 text-purple-600"
-                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
-              >
-                Calendar View
-              </button>
-            </nav>
-          </div>
-        </div>
-      )}
+      {/* Doctor View Header removed: redirect flow now handled via Overall tab filters */}
 
       {/* Tab Content */}
-      {!selectedDoctor && activeTab === "overall" && (
-        <Card className="bg-white border border-gray-200 shadow-sm">
+      {activeTab === "overall" && (
+        <Card id="tab-overall-panel" aria-labelledby="tab-overall" className="bg-white border border-gray-200 shadow-sm md:h-[40rem]">
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <CardTitle className="flex items-center text-[hsl(258_46%_25%)]">
+                <CardTitle className="flex items-center text-[hsl(258_46%_25%)] mb-1">
                   <CalendarIcon className="mr-2 h-5 w-5" />
-                  Overall Appointments
+                  List of Appointments
                 </CardTitle>
-                <CardDescription className="text-[hsl(258_22%_50%)]">All appointments across all doctors</CardDescription>
+                <CardDescription className="text-[hsl(258_22%_50%)]">Central hub for managing clinic appointments</CardDescription>
               </div>
+              <Button 
+                style={{ backgroundColor: 'hsl(258, 46%, 25%)', color: 'white' }}
+                className="hover:opacity-90 cursor-pointer active:opacity-80 transition-opacity transition-transform duration-200 ease-in-out active:scale-[0.97]"
+                onClick={() => setIsNewAppointmentOpen(true)}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                New Appointment
+              </Button>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Filter Controls (Search + Filters) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
-              {/* Search */}
-              <div className="sm:col-span-2 lg:col-span-1">
+            <div className="space-y-4 p-4 bg-gray-50 rounded-lg">
+              {/* Row 1: Search (half-width) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="relative max-w-full">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-[hsl(258_22%_50%)]" />
                   <Input
@@ -630,84 +687,111 @@ export default function AdminAppointmentsPage() {
                     className="pl-9 h-9 text-[hsl(258_46%_25%)] placeholder:text-[hsl(258_22%_50%)]"
                   />
                 </div>
+                {/* Empty space for balance */}
+                <div aria-hidden="true" className="hidden md:block" />
               </div>
-              {/* Date Filter Popover */}
-              <div className="relative inline-flex items-center gap-2" ref={popRef}>
-                <span className="text-sm font-medium text-[hsl(258_22%_50%)]">Date:</span>
-                <Button
-                  variant="outline"
-                  onClick={() => setIsDateFilterOpen((v) => !v)}
-                  className="bg-white text-[hsl(258_46%_25%)] hover:bg-purple-50 active:bg-purple-100 active:scale-[0.98] cursor-pointer flex items-center gap-2 transition-colors transition-transform duration-150 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300"
-                >
-                  <CalendarIcon className="h-4 w-4" />
-                  <span className="text-[hsl(258_46%_25%)] text-sm">
-                    {(() => {
+              
+              {/* Row 2: Filters with nested grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Date Filter - 1/3 of row */}
+                <div className="relative inline-flex items-center gap-2" ref={popRef}>
+                  <span className="text-sm font-medium text-[hsl(258_22%_50%)] whitespace-nowrap">Date:</span>
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsDateFilterOpen((v) => !v)}
+                    className="bg-white text-[hsl(258_46%_25%)] hover:bg-purple-50 active:bg-purple-100 active:scale-[0.98] cursor-pointer flex items-center gap-2 transition-colors transition-transform duration-150 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 w-full max-w-full"
+                  >
+                    <CalendarIcon className="h-4 w-4 flex-shrink-0" />
+                    <span className="text-[hsl(258_46%_25%)] text-sm truncate">{(() => {
                       const fmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
                       if (selectedStart && selectedEnd) return `${fmt.format(selectedStart)} – ${fmt.format(selectedEnd)}`;
                       if (selectedStart) return fmt.format(selectedStart);
                       return 'Select date';
-                    })()}
-                  </span>
-                </Button>
-                {isDateFilterOpen && (
-                  <div
-                    className="absolute z-50 mt-2 left-0 top-full shadow-lg animate-[fadeDown_150ms_ease-out]"
-                    style={{ minWidth: 280 }}
-                  >
-                    <CalendarRange
-                      selectedStart={selectedStart}
-                      selectedEnd={selectedEnd}
-                      onChange={(s, e) => {
-                        setSelectedStart(s);
-                        setSelectedEnd(e);
-                        // Do not auto-close; allow continued selection
-                      }}
-                      currentMonth={currentMonth}
-                      onMonthChange={(d) => setCurrentMonth(d)}
-                      minDate={minDate}
-                      yearRange={{ start: minDate.getFullYear() - 1, end: minDate.getFullYear() + 5 }}
-                    />
+                    })()}</span>
+                  </Button>
+                  {isDateFilterOpen && (
+                    <div
+                      className="absolute z-50 mt-2 left-0 top-full shadow-lg animate-[fadeDown_150ms_ease-out]"
+                      style={{ minWidth: 280 }}
+                    >
+                      <CalendarRange
+                        selectedStart={selectedStart}
+                        selectedEnd={selectedEnd}
+                        onChange={(s, e) => {
+                          setSelectedStart(s);
+                          setSelectedEnd(e);
+                          // Do not auto-close; allow continued selection
+                        }}
+                        currentMonth={currentMonth}
+                        onMonthChange={(d) => setCurrentMonth(d)}
+                        minDate={minDate}
+                        yearRange={{ start: minDate.getFullYear() - 1, end: minDate.getFullYear() + 5 }}
+                      />
+                    </div>
+                  )}
+                </div>
+                
+                {/* Nested grid for Doctor, Status, Reset - 2/3 of row */}
+                <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-5 gap-4">
+                  {/* Doctor Filter - 2/5 of nested grid */}
+                  <div className="sm:col-span-2 inline-flex items-center gap-2">
+                    <label className="text-sm font-medium text-[hsl(258_22%_50%)] whitespace-nowrap">Doctor:</label>
+                    <select
+                      value={filterDoctor}
+                      onChange={(e) => setFilterDoctor(e.target.value)}
+                      className="h-9 px-3 border border-gray-300 rounded-md text-sm text-[hsl(258_46%_25%)] bg-white focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-transparent cursor-pointer flex-1 min-w-0"
+                    >
+                      <option value="all">All Doctors</option>
+                      {doctors.map(doctor => (
+                        <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
+                      ))}
+                    </select>
                   </div>
-                )}
-              </div>
-
-              <div className="inline-flex items-center gap-2">
-                <label className="text-sm font-medium text-[hsl(258_22%_50%)]">Doctor:</label>
-                <select
-                  value={filterDoctor}
-                  onChange={(e) => setFilterDoctor(e.target.value)}
-                  className="h-9 px-3 border border-gray-300 rounded-md text-sm text-[hsl(258_46%_25%)] bg-white focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-transparent cursor-pointer"
-                >
-                  <option value="all">All Doctors</option>
-                  {doctors.map(doctor => (
-                    <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="inline-flex items-center gap-2">
-                <label className="text-sm font-medium text-[hsl(258_22%_50%)]">Status:</label>
-                <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className="h-9 px-3 border border-gray-300 rounded-md text-sm text-[hsl(258_46%_25%)] bg-white focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-transparent cursor-pointer"
-                >
-                  <option value="all">All Status</option>
-                  <option value="pending">Pending</option>
-                  <option value="approved">Approved</option>
-                  <option value="arrived">Arrived</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
-                  <option value="rejected">Rejected</option>
-                </select>
+                  
+                  {/* Status Filter - 2/5 of nested grid */}
+                  <div className="sm:col-span-2 inline-flex items-center gap-2">
+                    <label className="text-sm font-medium text-[hsl(258_22%_50%)] whitespace-nowrap">Status:</label>
+                    <select
+                      value={filterStatus}
+                      onChange={(e) => setFilterStatus(e.target.value)}
+                      className="h-9 px-3 border border-gray-300 rounded-md text-sm text-[hsl(258_46%_25%)] bg-white focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-transparent cursor-pointer flex-1 min-w-0"
+                    >
+                      <option value="all">All Status</option>
+                      <option value="pending">Pending</option>
+                      <option value="approved">Approved</option>
+                      <option value="arrived">Arrived</option>
+                      <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
+                      <option value="rejected">Rejected</option>
+                    </select>
+                  </div>
+                  
+                  {/* Reset Filters - 1/5 of nested grid */}
+                  <div className="sm:col-span-1 flex items-center justify-start sm:justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleResetFilters}
+                      disabled={!hasNonDefaultFilters}
+                      aria-hidden={!hasNonDefaultFilters}
+                      tabIndex={hasNonDefaultFilters ? 0 : -1}
+                      className={`border-purple-300 text-purple-700 transition-colors transition-transform transition-opacity duration-200 ease-out active:scale-[0.97] whitespace-nowrap
+                        ${hasNonDefaultFilters ? "opacity-100 scale-100 hover:text-purple-800 hover:bg-purple-50 active:bg-purple-100 active:text-purple-900 cursor-pointer" : "opacity-0 scale-95 pointer-events-none select-none"}`}
+                    >
+                      <RotateCcw className="h-4 w-4 mr-2" />
+                      Reset Filters
+                    </Button>
+                  </div>
+                </div>
               </div>
             </div>
 
             {/* Search removed: now integrated into filters */}
 
-            {/* Appointments Table */}
+            {/* Appointments Table with bottom fade indicator */}
             <div className="overflow-x-auto">
-              <div className="h-[24rem] overflow-y-auto">
+              <div className={`relative ${isResetting ? 'opacity-60 transition-opacity duration-150' : 'transition-opacity duration-150'}`}>
+                <div ref={listScrollRef} className="h-[24rem] overflow-y-auto">
                 {(() => {
                   const rows = getFilteredAppointments();
                   if (rows.length === 0) {
@@ -721,8 +805,8 @@ export default function AdminAppointmentsPage() {
                     );
                   }
                   return (
-                    <table className="w-full">
-                      <thead>
+                       <table className="w-full">
+                         <thead className={`sticky top-0 z-10 bg-white ${showListTopShadow ? 'shadow-sm' : ''}`}>
                         <tr className="border-b border-gray-200">
                           <th className="text-center py-3 px-4 font-medium text-[hsl(258_22%_50%)] w-[150px]">Requested On</th>
                           <th className="text-left py-3 px-4 font-medium text-[hsl(258_22%_50%)] w-[28%]">Patient Name</th>
@@ -849,14 +933,21 @@ export default function AdminAppointmentsPage() {
                     </table>
                   );
                 })()}
+                </div>
+                {showListBottomFade && (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-b from-transparent to-white transition-opacity duration-200"
+                  />
+                )}
               </div>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {!selectedDoctor && activeTab === "doctors" && (
-        <Card className="bg-white border border-gray-200 shadow-sm">
+      {activeTab === "doctors" && (
+        <Card id="tab-doctors-panel" aria-labelledby="tab-doctors" className="bg-white border border-gray-200 shadow-sm md:h-[40rem]">
           <CardHeader>
             <CardTitle className="flex items-center text-[hsl(258_46%_25%)]">
               <Users className="mr-2 h-5 w-5" />
@@ -865,14 +956,14 @@ export default function AdminAppointmentsPage() {
             <CardDescription className="text-[hsl(258_22%_50%)]">Select a doctor to view their appointments and schedule</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="h-[24rem] overflow-y-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {doctors.map((doctor) => (
                 <Card 
                   key={doctor.id} 
-                  className="cursor-pointer hover:shadow-md transition-shadow border border-gray-200"
-                  onClick={() => setSelectedDoctor(doctor)}
+                  className="hover:shadow-md transition-shadow border border-gray-200"
                 >
-                  <CardContent className="p-6">
+                  <CardContent className="p-6 h-full flex flex-col">
                     <div className="flex items-center space-x-4">
                       <Avatar className="h-12 w-12">
                         <AvatarFallback style={{ backgroundColor: 'hsl(258, 22%, 65%)', color: 'hsl(258, 46%, 25%)' }}>
@@ -897,16 +988,35 @@ export default function AdminAppointmentsPage() {
                         <div className="text-xs text-[hsl(258_22%_50%)]">Pending Approvals</div>
                       </div>
                     </div>
+                    <div className="mt-auto pt-4 flex flex-col gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => goToOverallWithDoctorToday(doctor.id)}
+                        style={{ backgroundColor: 'hsl(258, 46%, 25%)', color: 'white' }}
+                        className="w-full sm:w-auto min-w-[14rem] justify-center action-btn-compact cursor-pointer hover:opacity-90 active:opacity-80 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]"
+                      >
+                        View Today's Appointments
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => goToOverallWithDoctorUpcoming(doctor.id)}
+                        className="w-full sm:w-auto min-w-[14rem] justify-center action-btn-compact cursor-pointer border-purple-300 text-purple-700 hover:text-purple-800 hover:bg-purple-50 active:bg-purple-100 active:text-purple-900 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]"
+                      >
+                        View Upcoming Appointments
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               ))}
+              </div>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {!selectedDoctor && activeTab === "calendar" && (
-        <Card className="bg-white border border-gray-200 shadow-sm">
+      {activeTab === "calendar" && (
+        <Card id="tab-calendar-panel" aria-labelledby="tab-calendar" className="bg-white border border-gray-200 shadow-sm md:h-[40rem]">
           <CardHeader>
             <CardTitle className="flex items-center text-[hsl(258_46%_25%)]">
               <CalendarIcon className="mr-2 h-5 w-5" />
@@ -915,97 +1025,18 @@ export default function AdminAppointmentsPage() {
             <CardDescription className="text-[hsl(258_22%_50%)]">Monthly/weekly calendar view of all appointments</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-center py-12 text-[hsl(258_22%_50%)]">
+            <div className="h-[24rem] overflow-y-auto">
+              <div className="text-center py-12 text-[hsl(258_22%_50%)]">
               <CalendarIcon className="h-12 w-12 mx-auto mb-4" />
               <p>Calendar view will be implemented here</p>
               <p className="text-sm">Show appointments across all doctors with filtering options</p>
+              </div>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Doctor-specific views */}
-      {selectedDoctor && doctorTab === "appointments" && (
-        <Card className="bg-white border border-gray-200 shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center text-[hsl(258_46%_25%)]">
-              <CalendarIcon className="mr-2 h-5 w-5" />
-              {selectedDoctor.name}'s Appointments Today
-            </CardTitle>
-            <CardDescription className="text-[hsl(258_22%_50%)]">Appointments for {new Date().toLocaleDateString()}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left py-3 px-4 font-medium text-[hsl(258_22%_50%)]">Patient Name</th>
-                    <th className="text-left py-3 px-4 font-medium text-[hsl(258_22%_50%)]">Time</th>
-                    <th className="text-left py-3 px-4 font-medium text-[hsl(258_22%_50%)]">Service</th>
-                    <th className="text-left py-3 px-4 font-medium text-[hsl(258_22%_50%)]">Status</th>
-                    <th className="text-left py-3 px-4 font-medium text-[hsl(258_22%_50%)]">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {todayAppointments
-                    .filter(apt => apt.doctorId === selectedDoctor.id)
-                    .map((appointment) => (
-                    <tr 
-                      key={appointment.id} 
-                      className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
-                      onClick={() => handleAppointmentClick(appointment)}
-                    >
-                      <td className="py-3 px-4">
-                        <div className="flex items-center space-x-3">
-                          <Avatar className="h-8 w-8">
-                            <AvatarFallback style={{ backgroundColor: 'hsl(258, 22%, 65%)', color: 'hsl(258, 46%, 25%)' }}>
-                              {getInitials(appointment.patientName)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="font-medium text-[hsl(258_46%_25%)]">{appointment.patientName}</div>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 text-[hsl(258_46%_25%)]">{appointment.time}</td>
-                      <td className="py-3 px-4 text-[hsl(258_46%_25%)]">{appointment.service}</td>
-                      <td className="py-3 px-4">
-                        <Badge className={getStatusColor(appointment.status)}>
-                          {appointment.status.charAt(0).toUpperCase() + appointment.status.slice(1)}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="flex space-x-2" onClick={(e) => e.stopPropagation()}>
-                          <Button size="sm" variant="outline" className="action-btn-w action-btn-compact">
-                            View Details
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {selectedDoctor && doctorTab === "calendar" && (
-        <Card className="bg-white border border-gray-200 shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center text-[hsl(258_46%_25%)]">
-              <CalendarIcon className="mr-2 h-5 w-5" />
-              {selectedDoctor.name}'s Calendar
-            </CardTitle>
-            <CardDescription className="text-[hsl(258_22%_50%)]">Weekly/monthly schedule view</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-center py-12 text-[hsl(258_22%_50%)]">
-              <CalendarIcon className="h-12 w-12 mx-auto mb-4" />
-              <p>Doctor's calendar view will be implemented here</p>
-              <p className="text-sm">Show {selectedDoctor.name}'s schedule and availability</p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* Doctor-specific views removed to avoid duplication. All appointment listings reside in Overall tab. */}
 
       {/* Appointment Details Modal */}
       {selectedAppointment && (
@@ -1094,7 +1125,7 @@ export default function AdminAppointmentsPage() {
                     </div>
                     <div>
                       <label className="text-sm font-medium text-[hsl(258_22%_50%)]">Time</label>
-                      <p className="text-[hsl(258_46%_25%)]">{selectedAppointment.time}</p>
+                      <p className="text-[hsl(258_46%_25%)]">{formatTime12h(selectedAppointment.time)}</p>
                     </div>
                     <div>
                       <label className="text-sm font-medium text-[hsl(258_22%_50%)]">Requested On</label>
@@ -1105,10 +1136,12 @@ export default function AdminAppointmentsPage() {
                       <p className="text-[hsl(258_46%_25%)]">{selectedAppointment.duration}</p>
                     </div>
                     <div>
-                      <label className="text-sm font-medium text-[hsl(258_22%_50%)]">Status</label>
-                      <Badge className={getStatusColor(selectedAppointment.status)}>
-                        {selectedAppointment.status.charAt(0).toUpperCase() + selectedAppointment.status.slice(1)}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-[hsl(258_22%_50%)]">Status:</span>
+                        <Badge className={`status-badge ${getStatusColor(selectedAppointment.status)}`}>
+                          {selectedAppointment.status.charAt(0).toUpperCase() + selectedAppointment.status.slice(1)}
+                        </Badge>
+                      </div>
                     </div>
                   </div>
                   {selectedAppointment.actionReason && (
@@ -1143,7 +1176,7 @@ export default function AdminAppointmentsPage() {
                       placeholder="Add notes or special instructions..."
                     />
                   </div>
-                  <Button onClick={handleAddNotes} variant="outline" size="sm">
+                  <Button onClick={handleAddNotes} variant="outline" size="sm" className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]">
                     <FileText className="h-4 w-4 mr-1" />
                     Save Notes
                   </Button>
@@ -1215,22 +1248,7 @@ export default function AdminAppointmentsPage() {
                 )}
                 
 
-                {/* Optional: Reschedule stays available for non-cancelled/completed */}
-                {selectedAppointment.status !== "cancelled" && selectedAppointment.status !== "completed" && (
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      toast({
-                        title: "Reschedule",
-                        description: "Reschedule functionality will be implemented here",
-                      });
-                    }}
-                    className="action-btn-w cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]"
-                  >
-                    <RotateCcw className="h-4 w-4 mr-2" />
-                    Reschedule
-                  </Button>
-                )}
+                {/* Reschedule removed per requirements */}
 
                 <Button
                   variant="outline"
