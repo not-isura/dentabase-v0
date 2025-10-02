@@ -3,7 +3,7 @@
 
 
  import { useEffect, useRef, useState } from "react";
-import { Plus, Search, Filter, Calendar as CalendarIcon, Clock, User, Phone, Mail, ArrowLeft, Check, X, AlertTriangle, RotateCcw, Users, Stethoscope, FileText, Eye, Flag, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Search, Filter, Calendar as CalendarIcon, Clock, User, Phone, Mail, ArrowLeft, Check, X, AlertTriangle, RotateCcw, Users, Stethoscope, FileText, Flag, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -296,6 +296,7 @@ export default function AdminAppointmentsPage() {
   const [showListBottomFade, setShowListBottomFade] = useState(false);
   const [showListTopShadow, setShowListTopShadow] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const monthYearPickerRef = useRef<HTMLDivElement | null>(null);
 
   // Close on outside click/ESC
   useEffect(() => {
@@ -356,6 +357,35 @@ export default function AdminAppointmentsPage() {
   const [pendingAction, setPendingAction] = useState<{ type: ActionType; appointment: Appointment | null }>({ type: "accept", appointment: null });
   const [actionReasonText, setActionReasonText] = useState("");
   const { toast } = useToast();
+  
+  // Calendar view state
+  const [calendarMonth, setCalendarMonth] = useState<Date>(new Date(minDate.getFullYear(), minDate.getMonth(), 1));
+  const [selectedCalendarDay, setSelectedCalendarDay] = useState<Date | null>(null);
+  const [isDayModalOpen, setIsDayModalOpen] = useState(false);
+  const [isMonthYearPickerOpen, setIsMonthYearPickerOpen] = useState(false);
+  const [pickerView, setPickerView] = useState<"month" | "year">("month"); // Track which view is active
+  const [pickerYear, setPickerYear] = useState<number>(new Date().getFullYear()); // Track year for month view
+  const [yearPageStart, setYearPageStart] = useState<number>(new Date().getFullYear() - 6); // Track year grid start
+
+  // Close month/year picker on outside click/ESC
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (!isMonthYearPickerOpen) return;
+      const t = e.target as Node;
+      if (monthYearPickerRef.current && !monthYearPickerRef.current.contains(t)) {
+        setIsMonthYearPickerOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsMonthYearPickerOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [isMonthYearPickerOpen]);
 
   // Date helpers
   const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -536,6 +566,75 @@ export default function AdminAppointmentsPage() {
     setSelectedEnd(oneYearAhead);
     setFromStart(false);
     setActiveTab("overall");
+  };
+
+  // Calendar helper functions
+  const getDaysInMonth = (date: Date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    return new Date(year, month + 1, 0).getDate();
+  };
+
+  const getFirstDayOfMonth = (date: Date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    return new Date(year, month, 1).getDay();
+  };
+
+  const getAppointmentsForDay = (date: Date) => {
+    const dateStr = toYMD(date);
+    return appointments.filter(apt => apt.date === dateStr);
+  };
+
+  const goToOverallWithDate = (date: Date) => {
+    setSelectedStart(date);
+    setSelectedEnd(null);
+    setFromStart(false);
+    setFilterDoctor("all");
+    setFilterStatus("all");
+    setActiveTab("overall");
+  };
+
+  const handleDayClick = (date: Date) => {
+    setSelectedCalendarDay(date);
+    setIsDayModalOpen(true);
+  };
+
+  const navigateCalendarMonth = (direction: "prev" | "next") => {
+    setCalendarMonth(prev => {
+      const newMonth = new Date(prev);
+      if (direction === "prev") {
+        newMonth.setMonth(prev.getMonth() - 1);
+      } else {
+        newMonth.setMonth(prev.getMonth() + 1);
+      }
+      return newMonth;
+    });
+  };
+
+  const goToToday = () => {
+    setCalendarMonth(new Date(demoToday.getFullYear(), demoToday.getMonth(), 1));
+  };
+
+  const goToMonthYear = (month: number, year: number) => {
+    setCalendarMonth(new Date(year, month, 1));
+    setIsMonthYearPickerOpen(false);
+    setPickerView("month");
+  };
+
+  const handleMonthYearButtonClick = () => {
+    setPickerYear(calendarMonth.getFullYear());
+    setYearPageStart(calendarMonth.getFullYear() - 6);
+    setPickerView("month");
+    setIsMonthYearPickerOpen(!isMonthYearPickerOpen);
+  };
+
+  const changePickerYear = (delta: number) => {
+    setPickerYear(prev => prev + delta);
+  };
+
+  const changeYearPage = (delta: number) => {
+    setYearPageStart(prev => prev + delta * 12);
   };
 
   // Reset Filters: Date -> today, Doctor -> all, Status -> all
@@ -1017,20 +1116,264 @@ export default function AdminAppointmentsPage() {
       )}
 
       {activeTab === "calendar" && (
-        <Card id="tab-calendar-panel" aria-labelledby="tab-calendar" className="bg-white border border-gray-200 shadow-sm md:h-[40rem]">
+        <Card id="tab-calendar-panel" aria-labelledby="tab-calendar" className="bg-white border border-gray-200 shadow-sm md:h-[48rem]">
           <CardHeader>
-            <CardTitle className="flex items-center text-[hsl(258_46%_25%)]">
-              <CalendarIcon className="mr-2 h-5 w-5" />
-              Overall Calendar View
-            </CardTitle>
-            <CardDescription className="text-[hsl(258_22%_50%)]">Monthly/weekly calendar view of all appointments</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center text-[hsl(258_46%_25%)] mb-1">
+                  <CalendarIcon className="mr-2 h-5 w-5" />
+                  Calendar View
+                </CardTitle>
+                <CardDescription className="text-[hsl(258_22%_50%)]">Monthly overview of all appointments</CardDescription>
+              </div>
+              {/* Month Navigation */}
+              <div className="flex items-center gap-2 relative">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={goToToday}
+                  className="cursor-pointer hover:bg-purple-50 active:bg-purple-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97] text-[hsl(258_46%_25%)] border-purple-200"
+                >
+                  Today
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigateCalendarMonth("prev")}
+                  className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="relative">
+                  <button
+                    onClick={handleMonthYearButtonClick}
+                    className="text-sm font-semibold text-[hsl(258_46%_25%)] min-w-[140px] text-center px-3 py-1.5 rounded-md hover:bg-purple-50 active:bg-purple-100 transition-colors cursor-pointer"
+                  >
+                    {formatMonthYear(calendarMonth)}
+                  </button>
+                  
+                  {/* Month/Year Picker Dropdown */}
+                  {isMonthYearPickerOpen && (
+                    <div ref={monthYearPickerRef} className="absolute right-0 top-full mt-2 z-50 bg-white rounded-lg shadow-xl border border-gray-200 w-[280px] p-3">
+                      {/* Header with navigation and view toggle */}
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-1">
+                          {pickerView === "year" && (
+                            <button
+                              className="p-1 rounded hover:bg-gray-100"
+                              onClick={() => setPickerView("month")}
+                              aria-label="Back"
+                            >
+                              <ArrowLeft className="h-4 w-4" />
+                            </button>
+                          )}
+                          <button
+                            className="px-2 py-1 rounded hover:bg-gray-100 text-sm font-medium text-[hsl(258_46%_25%)]"
+                            onClick={() => setPickerView(pickerView === "month" ? "year" : "month")}
+                            aria-label="Change view"
+                          >
+                            {pickerView === "month" && <span>{pickerYear}</span>}
+                            {pickerView === "year" && <span>{yearPageStart} – {yearPageStart + 11}</span>}
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            className="p-1 rounded hover:bg-gray-100"
+                            onClick={() => {
+                              if (pickerView === "month") changePickerYear(-1);
+                              else changeYearPage(-1);
+                            }}
+                            aria-label="Previous"
+                          >
+                            <ChevronLeft className="h-4 w-4" />
+                          </button>
+                          <button
+                            className="p-1 rounded hover:bg-gray-100"
+                            onClick={() => {
+                              if (pickerView === "month") changePickerYear(1);
+                              else changeYearPage(1);
+                            }}
+                            aria-label="Next"
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Month/Year Grid */}
+                      <div className="transition-all duration-150 ease-out">
+                        {pickerView === "month" ? (
+                          // Month Grid (3x4)
+                          <div className="grid grid-cols-3 gap-2">
+                            {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((monthName, idx) => {
+                              const isSelected = idx === calendarMonth.getMonth() && pickerYear === calendarMonth.getFullYear();
+                              return (
+                                <button
+                                  key={monthName}
+                                  onClick={() => goToMonthYear(idx, pickerYear)}
+                                  className={`px-2 py-2 rounded border text-sm transition-colors ${
+                                    isSelected
+                                      ? 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700'
+                                      : 'text-[hsl(258_46%_25%)] border-gray-200 hover:bg-purple-50'
+                                  }`}
+                                >
+                                  {monthName}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          // Year Grid (3x4)
+                          <div className="max-h-[180px] overflow-y-auto pr-1">
+                            <div className="grid grid-cols-3 gap-2">
+                              {Array.from({ length: 12 }, (_, i) => yearPageStart + i).map((year) => {
+                                const isSelected = year === pickerYear;
+                                return (
+                                  <button
+                                    key={year}
+                                    onClick={() => {
+                                      setPickerYear(year);
+                                      setPickerView("month");
+                                    }}
+                                    className={`px-2 py-2 rounded border text-sm transition-colors ${
+                                      isSelected
+                                        ? 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700'
+                                        : 'text-[hsl(258_46%_25%)] border-gray-200 hover:bg-purple-50'
+                                    }`}
+                                  >
+                                    {year}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Footer */}
+                      <div className="flex items-center justify-between mt-3 pt-2 border-t">
+                        <div className="text-xs text-[hsl(258_22%_50%)]">
+                          {formatMonthYear(calendarMonth)}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const today = demoToday;
+                            goToMonthYear(today.getMonth(), today.getFullYear());
+                            setPickerYear(today.getFullYear());
+                            setYearPageStart(today.getFullYear() - 6);
+                          }}
+                          className="text-[hsl(258_46%_25%)] hover:bg-purple-50 px-2 py-1 text-xs"
+                        >
+                          Today
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigateCalendarMonth("next")}
+                  className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="h-[24rem] overflow-y-auto">
-              <div className="text-center py-12 text-[hsl(258_22%_50%)]">
-              <CalendarIcon className="h-12 w-12 mx-auto mb-4" />
-              <p>Calendar view will be implemented here</p>
-              <p className="text-sm">Show appointments across all doctors with filtering options</p>
+            <div className="overflow-hidden px-1">
+              {/* Calendar Grid */}
+              <div className="grid grid-cols-7 gap-1 mb-1">
+                {/* Day headers */}
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day => (
+                  <div key={day} className="text-center text-[10px] sm:text-xs font-semibold text-[hsl(258_22%_50%)] py-1">
+                    {day}
+                  </div>
+                ))}
+              </div>
+              
+              {/* Calendar days */}
+              <div className="grid grid-cols-7 gap-1.5 sm:gap-2 pb-4">
+                {(() => {
+                  const daysInMonth = getDaysInMonth(calendarMonth);
+                  const firstDay = getFirstDayOfMonth(calendarMonth);
+                  const days: React.ReactElement[] = [];
+                  
+                  // Empty cells before first day
+                  for (let i = 0; i < firstDay; i++) {
+                    days.push(
+                      <div key={`empty-${i}`} className="h-16 sm:h-20 md:h-24 bg-gray-50 rounded-md" />
+                    );
+                  }
+                  
+                  // Days of the month
+                  for (let day = 1; day <= daysInMonth; day++) {
+                    const date = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day);
+                    const dayAppointments = getAppointmentsForDay(date);
+                    const appointmentCount = dayAppointments.length;
+                    const isToday = isSameDay(date, demoToday);
+                    
+                    days.push(
+                      <div
+                        key={day}
+                        onClick={() => handleDayClick(date)}
+                        className={`h-16 sm:h-20 md:h-24 border rounded-md p-1 sm:p-1.5 cursor-pointer transition-all duration-200 hover:shadow-md hover:scale-105 relative group ${
+                          appointmentCount > 0 
+                            ? 'bg-white border-purple-200 hover:border-purple-400' 
+                            : 'bg-gray-50 border-gray-200 hover:border-gray-300'
+                        } ${isToday ? 'ring-2 ring-purple-500 ring-offset-1' : ''}`}
+                      >
+                        {/* Day number */}
+                        <div className={`text-xs sm:text-sm font-bold ${
+                          appointmentCount > 0 
+                            ? 'text-[hsl(258_46%_20%)]' 
+                            : 'text-gray-500'
+                        } ${isToday ? 'text-purple-600' : ''}`}>
+                          {day}
+                        </div>
+                        
+                        {/* Appointment preview bars */}
+                        {appointmentCount > 0 && (
+                          <div className="mt-0.5 sm:mt-1 space-y-0.5">
+                            {dayAppointments.slice(0, 3).map((apt, idx) => (
+                              <div
+                                key={apt.id}
+                                className={`h-1.5 sm:h-2 rounded-full ${
+                                  apt.status === 'completed' ? 'bg-blue-500' :
+                                  apt.status === 'pending' ? 'bg-yellow-500' :
+                                  apt.status === 'approved' ? 'bg-green-500' :
+                                  apt.status === 'arrived' ? 'bg-purple-500' :
+                                  apt.status === 'cancelled' ? 'bg-gray-400' :
+                                  apt.status === 'rejected' ? 'bg-red-500' :
+                                  'bg-purple-500'
+                                }`}
+                              />
+                            ))}
+                            {appointmentCount > 3 && (
+                              <div className="text-[8px] sm:text-[9px] text-[hsl(258_46%_35%)] font-medium text-center mt-0.5">
+                                +{appointmentCount - 3}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {/* Hover tooltip */}
+                        {appointmentCount > 0 && (
+                          <div className="hidden sm:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                            <div className="bg-[hsl(258_46%_25%)] text-white text-xs px-2 py-1 rounded whitespace-nowrap shadow-lg">
+                              {appointmentCount} appointment{appointmentCount !== 1 ? 's' : ''}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  
+                  return days;
+                })()}
               </div>
             </div>
           </CardContent>
@@ -1322,6 +1665,117 @@ export default function AdminAppointmentsPage() {
         onClose={() => setIsNewAppointmentOpen(false)}
         onSave={handleNewAppointment}
       />
+
+      {/* Day Appointments Modal */}
+      {selectedCalendarDay && (
+        <Dialog open={isDayModalOpen} onOpenChange={setIsDayModalOpen}>
+          <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-hidden bg-white shadow-lg flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="flex items-center text-[hsl(258_46%_25%)] text-base sm:text-lg">
+                <CalendarIcon className="mr-2 h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" />
+                <span className="line-clamp-2">
+                  {new Intl.DateTimeFormat(undefined, { 
+                    weekday: 'long',
+                    month: 'long', 
+                    day: 'numeric', 
+                    year: 'numeric' 
+                  }).format(selectedCalendarDay)}
+                </span>
+              </DialogTitle>
+              <p className="text-xs sm:text-sm text-[hsl(258_22%_50%)] mt-1">
+                {(() => {
+                  const count = getAppointmentsForDay(selectedCalendarDay).length;
+                  return count === 0 ? 'No appointments' : `${count} appointment${count !== 1 ? 's' : ''} scheduled`;
+                })()}
+              </p>
+            </DialogHeader>
+
+            <div className="flex-1 overflow-y-auto py-2 sm:py-4 space-y-2 sm:space-y-3">
+              {(() => {
+                const dayAppointments = getAppointmentsForDay(selectedCalendarDay);
+                
+                if (dayAppointments.length === 0) {
+                  return (
+                    <div className="flex flex-col items-center justify-center py-12 text-[hsl(258_22%_50%)]">
+                      <CalendarIcon className="h-10 w-10 sm:h-12 sm:w-12 mb-3 opacity-50" />
+                      <p className="text-xs sm:text-sm">No appointments scheduled for this day</p>
+                    </div>
+                  );
+                }
+
+                // Sort appointments by time
+                const sortedAppointments = [...dayAppointments].sort((a, b) => {
+                  return a.time.localeCompare(b.time);
+                });
+
+                return sortedAppointments.map((appointment) => (
+                  <Card
+                    key={appointment.id}
+                    className="border border-gray-200 hover:border-purple-300 hover:shadow-md transition-all duration-200 cursor-pointer"
+                    onClick={() => {
+                      // Don't close day modal - allow nested modal behavior
+                      handleAppointmentClick(appointment);
+                    }}
+                  >
+                    <CardContent className="p-3 sm:p-4">
+                      <div className="flex items-start justify-between gap-2 sm:gap-4">
+                        {/* Left: Patient info */}
+                        <div className="flex items-start space-x-2 sm:space-x-3 flex-1 min-w-0">
+                          <Avatar className="h-8 w-8 sm:h-10 sm:w-10 mt-1 flex-shrink-0">
+                            <AvatarFallback style={{ backgroundColor: 'hsl(258, 22%, 65%)', color: 'hsl(258, 46%, 25%)' }}>
+                              {getInitials(appointment.patientName)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-semibold text-sm sm:text-base text-[hsl(258_46%_25%)] truncate">
+                              {appointment.patientName}
+                            </h4>
+                            <p className="text-xs sm:text-sm text-[hsl(258_22%_50%)] truncate">
+                              {appointment.service}
+                            </p>
+                            <div className="flex items-center gap-1 sm:gap-2 mt-1 flex-wrap">
+                              <div className="flex items-center text-[10px] sm:text-xs text-[hsl(258_22%_50%)]">
+                                <Stethoscope className="h-3 w-3 mr-0.5 sm:mr-1 flex-shrink-0" />
+                                <span className="truncate">{appointment.doctorName}</span>
+                              </div>
+                              <span className="text-gray-300 hidden sm:inline">•</span>
+                              <div className="flex items-center text-[10px] sm:text-xs text-[hsl(258_22%_50%)]">
+                                <Clock className="h-3 w-3 mr-0.5 sm:mr-1 flex-shrink-0" />
+                                {appointment.duration}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right: Time and status */}
+                        <div className="flex flex-col items-end gap-1 sm:gap-2 flex-shrink-0">
+                          <div className="text-base sm:text-lg font-bold text-[hsl(258_46%_25%)]">
+                            {formatTime12h(appointment.time)}
+                          </div>
+                          <Badge className={`status-badge text-[10px] sm:text-xs ${getStatusColor(appointment.status)}`}>
+                            {appointment.status.charAt(0).toUpperCase() + appointment.status.slice(1)}
+                          </Badge>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ));
+              })()}
+            </div>
+
+            {/* Footer with close button */}
+            <div className="border-t pt-3 sm:pt-4 flex justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setIsDayModalOpen(false)}
+                className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97] text-sm"
+              >
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
