@@ -76,7 +76,7 @@ export default function SettingsPage() {
       title: "Privacy & Security",
       description: "Security settings and privacy controls",
       items: ["Two-Factor Authentication", "Login Sessions", "Access Logs", "Data Privacy"],
-      route: "/settings/security"
+      route: "/settings/privacy"
     },
     {
       icon: HelpCircle,

@@ -65,15 +65,23 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
               {/* Navigation */}
               <nav className="space-y-1">
-                {navItems.map((item) => (
-                  <div key={item.href} className="mb-2">
-                    <Link href={item.href} className="cursor-pointer group relative">
+                {navItems.map((item) => {
+                  const isAppointmentsTab = item.href === "/appointments";
+                  const isSettingsTab = item.href === "/settings";
+                  const isActive =
+                    pathname === item.href ||
+                    (isAppointmentsTab && pathname.startsWith("/appointments") && !pathname.startsWith("/appointments/admin")) ||
+                    (isSettingsTab && pathname.startsWith("/settings"));
+
+                  return (
+                    <div key={item.href} className="mb-2">
+                      <Link href={item.href} className="cursor-pointer group relative">
                       <Button
-                        variant={pathname === item.href ? "default" : "ghost"}
+                        variant={isActive ? "default" : "ghost"}
                         className={`w-full font-semibold cursor-pointer transition-all duration-200
                           md:justify-center sm:justify-center lg:justify-start xl:justify-start
                           md:px-3 sm:px-3 lg:px-4 xl:px-4
-                          ${pathname === item.href 
+                          ${isActive 
                             ? "bg-[hsl(258_46%_25%)] text-white" 
                             : "text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.1)]"
                         }`}
@@ -87,9 +95,10 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                                      hidden md:block sm:block lg:hidden xl:hidden">
                         {item.label}
                       </div>
-                    </Link>
-                  </div>
-                ))}
+                      </Link>
+                    </div>
+                  );
+                })}
               </nav>
             </div>
           </div>

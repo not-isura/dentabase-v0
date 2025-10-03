@@ -161,7 +161,7 @@ export function UserProfile({
       onClick: () => {
         setIsOpen(false);
         // Navigate to profile page (not in sidebar)
-        window.location.href = "/profile";
+        window.location.href = "/settings/profile";
       }
     },
     { 
@@ -170,7 +170,7 @@ export function UserProfile({
       onClick: () => {
         setIsOpen(false);
         // Navigate to notifications page (not in sidebar)
-        window.location.href = "/notifications";
+        window.location.href = "/settings/notifications";
       }
     },
     { 
@@ -179,7 +179,7 @@ export function UserProfile({
       onClick: () => {
         setIsOpen(false);
         // Navigate to privacy page (not in sidebar)
-        window.location.href = "/privacy";
+        window.location.href = "/settings/privacy";
       }
     },
     { 
@@ -188,7 +188,7 @@ export function UserProfile({
       onClick: () => {
         setIsOpen(false);
         // Navigate to help page (not in sidebar)
-        window.location.href = "/help";
+        window.location.href = "/settings/help";
       }
     },
     { icon: Settings, label: "Settings", onClick: handleSettingsClick },
