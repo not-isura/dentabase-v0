@@ -47,7 +47,7 @@ export function Navbar({
 }: NavbarProps) {
   return (
     <nav className={cn(
-      "fixed top-0 right-0 h-16 bg-white/80 backdrop-blur-sm border-b shadow-sm z-10 transition-all duration-300 ease-in-out",
+      "fixed top-0 right-0 h-16 bg-white/80 backdrop-blur-sm border-b shadow-sm z-40 transition-all duration-300 ease-in-out",
       leftOffset,
       className
     )}>
