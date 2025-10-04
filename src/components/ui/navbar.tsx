@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Clock, User, Settings, LogOut, Bell, HelpCircle, Shield, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -132,6 +132,34 @@ export function UserProfile({
   className 
 }: UserProfileProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node;
+      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
+        setIsOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
 
   const handleSettingsClick = () => {
     setIsOpen(false);
@@ -196,7 +224,7 @@ export function UserProfile({
   ];
 
   return (
-    <div className={cn("relative", className)}>
+    <div ref={dropdownRef} className={cn("relative", className)}>
       {/* Profile Button */}
       <Button
         variant="ghost"
@@ -218,15 +246,7 @@ export function UserProfile({
 
       {/* Dropdown Menu */}
       {isOpen && (
-        <>
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 z-10" 
-            onClick={() => setIsOpen(false)}
-          />
-          
-          {/* Menu */}
-          <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-[hsl(258_22%_90%)] rounded-lg shadow-lg z-20">
+        <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-[hsl(258_22%_90%)] rounded-lg shadow-lg z-50">
             {/* User Info Header */}
             <div className="px-4 py-3 border-b border-[hsl(258_22%_90%)]">
               <p className="font-medium text-[hsl(258_46%_25%)]">{userName}</p>
@@ -250,8 +270,7 @@ export function UserProfile({
                 </button>
               ))}
             </div>
-          </div>
-        </>
+        </div>
       )}
     </div>
   );

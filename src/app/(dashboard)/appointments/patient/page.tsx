@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Check, Plus, X } from "lucide-react";
+import { Check, Clock, Plus, X } from "lucide-react";
 
 type StatusEntry = {
   date: string;
@@ -109,13 +109,29 @@ const StatusHistory: React.FC<StatusHistoryProps> = ({ history }) => {
           key={`${entry.date}-${entry.time}-${index}`}
           className="rounded-lg border border-[hsl(258_46%_25%/0.1)] bg-[hsl(258_46%_98%)] p-3"
         >
-          <div className="flex items-center justify-between text-xs text-gray-500">
-            <span>{entry.date}</span>
-            <span>{entry.time}</span>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                {entry.date}
+              </span>
+              <p className="mt-1 text-sm font-medium text-[hsl(258_46%_25%)]">
+                {entry.description}
+              </p>
+            </div>
+            <div className="hidden items-center gap-3 sm:flex sm:self-center">
+              <span className="hidden h-10 w-px rounded-full bg-[hsl(258_46%_25%/0.12)] sm:block" aria-hidden="true" />
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[hsl(258_46%_25%)]">
+                <Clock className="h-3.5 w-3.5" />
+                <span>{entry.time}</span>
+              </div>
+            </div>
           </div>
-          <p className="mt-1 text-sm font-medium text-[hsl(258_46%_25%)]">
-            {entry.description}
-          </p>
+          <div className="mt-2 flex sm:hidden">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[hsl(258_46%_25%)]">
+              <Clock className="h-3.5 w-3.5" />
+              <span>{entry.time}</span>
+            </div>
+          </div>
         </div>
       ))}
     </div>
