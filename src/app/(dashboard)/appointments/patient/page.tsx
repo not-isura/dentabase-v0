@@ -262,12 +262,12 @@ export default function AppointmentsPatientPage() {
     {
       currentStep: 4,
       history: [
-        { date: "Mar 12, 2025", time: "8:00 AM", description: "Complete (Finished Appointment)" },
+        { date: "Mar 12, 2025", time: "8:00 AM", description: "Complete" },
         { date: "Mar 12, 2025", time: "7:00 AM", description: "In Progress" },
         { date: "Mar 12, 2025", time: "6:40 AM", description: "Marked as Arrived" },
         { date: "Mar 11, 2025", time: "8:00 AM", description: "Request Approved" },
-        { date: "Mar 11, 2025", time: "7:45 AM", description: "Waiting for Feedback" },
-        { date: "Mar 11, 2025", time: "7:00 AM", description: "Request Sent → Pending Confirmation" }
+        { date: "Mar 11, 2025", time: "7:45 AM", description: "Pending Confirmation" },
+        { date: "Mar 11, 2025", time: "7:00 AM", description: "Request Sent" }
       ]
     }
   ];
