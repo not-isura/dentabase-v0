@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-type UserRole = "admin" | "doctor" | "dental-staff";
+type UserRole = "admin" | "doctor" | "dental_staff";
 type AccountStatus = "active" | "inactive";
 
 interface NewAccount {
@@ -58,7 +58,7 @@ const INITIAL_ACCOUNT_STATE: NewAccount = {
 const ROLE_LABEL_MAP: Record<UserRole, string> = {
   admin: "Admin",
   doctor: "Doctor",
-  "dental-staff": "Dental Staff"
+  "dental_staff": "Dental Staff"
 };
 
 interface ExistingUser {
@@ -96,7 +96,7 @@ export default function AccountManagementPage() {
       first_name: 'Maria',
       last_name: 'Rodriguez',
       email: 'maria.rodriguez@dentabase.com',
-      role: 'dental-staff',
+      role: 'dental_staff',
       status: 'active',
       created_at: '2024-09-15T14:30:00Z'
     }
@@ -113,7 +113,7 @@ export default function AccountManagementPage() {
       ...(role === "doctor"
         ? { designation: "", assignedDoctor: "" }
         : {}),
-      ...(role === "dental-staff"
+      ...(role === "dental_staff"
         ? { specialization: "", licenseNumber: "", clinicAssignment: "", scheduleAvailability: "" }
         : {}),
       ...(role === "admin"
@@ -177,7 +177,7 @@ export default function AccountManagementPage() {
     switch (role) {
       case "doctor":
         return "bg-[hsl(258_46%_25%/0.1)] text-[hsl(258_46%_25%)]";
-      case "dental-staff":
+      case "dental_staff":
         return "bg-blue-100 text-blue-800";
       case "admin":
         return "bg-amber-100 text-amber-800";
@@ -365,7 +365,7 @@ export default function AccountManagementPage() {
                         >
                           <option value="admin">Admin</option>
                           <option value="doctor">Doctor</option>
-                          <option value="dental-staff">Dental Staff</option>
+                          <option value="dental_staff">Dental Staff</option>
                         </select>
                       </div>
                       <div>
@@ -439,7 +439,7 @@ export default function AccountManagementPage() {
                     </div>
                   )}
 
-                  {newAccount.role === "dental-staff" && (
+                  {newAccount.role === "dental_staff" && (
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <div>
                         <Label htmlFor="designation">Position / Designation</Label>
