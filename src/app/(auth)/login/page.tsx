@@ -3,31 +3,86 @@
 import React, { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, AlertCircle } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
-    // Simulate login delay
-    setTimeout(() => {
+    setError(null);
+
+    try {
+      const supabase = createClient();
+
+      // 1. Sign in with Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (authError) {
+        throw new Error(authError.message);
+      }
+
+      if (!authData.user) {
+        throw new Error("No user data returned");
+      }
+
+      // 2. Query users table to get role
+      const { data: userData, error: userError } = await supabase
+        .from("users")
+        .select("role, first_name")
+        .eq("auth_id", authData.user.id)
+        .single();
+
+      if (userError) {
+        throw new Error("Failed to fetch user data: " + userError.message);
+      }
+
+      if (!userData) {
+        throw new Error("User profile not found");
+      }
+
+      console.log("✅ Login successful:", userData);
+
+      // 3. Redirect based on role
+      switch (userData.role) {
+        case "patient":
+          router.push("/dashboard");
+          break;
+        case "dentist":
+          router.push("/appointments/admin");
+          break;
+        case "dental_staff":
+          router.push("/appointments");
+          break;
+        case "admin":
+          router.push("/settings");
+          break;
+        default:
+          router.push("/dashboard");
+      }
+
+      // Force a router refresh to update session state
+      router.refresh();
+    } catch (err) {
+      console.error("❌ Login error:", err);
+      setError(err instanceof Error ? err.message : "An error occurred during login");
       setIsLoading(false);
-      // TODO: Implement actual login logic with onLogin callback
-      console.log("Login attempted with:", email, password);
-      
-      // Redirect to dashboard after successful login
-      window.location.href = "/dashboard";
-    }, 1000);
+    }
   };
 
   return (
@@ -58,6 +113,17 @@ export default function LoginPage() {
           </CardHeader>
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-4">
+              {/* Error Message */}
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-md p-3 flex items-start gap-2">
+                  <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm text-red-800 font-medium">Login Failed</p>
+                    <p className="text-sm text-red-700 mt-1">{error}</p>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-[hsl(258_46%_25%)] pb-0.4 block ">Email</Label>
                 <Input

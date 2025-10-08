@@ -1,9 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { 
   Calendar, 
   Users, 
@@ -14,6 +14,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Navbar, NavbarRight, UserProfile } from "@/components/ui/navbar";
+import { createClient } from "@/lib/supabase/client";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -30,12 +31,36 @@ const navItems = [
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  const handleLogout = () => {
-    // TODO: Implement actual logout logic
-    console.log("Logout clicked");
-    // Redirect to login page
-    window.location.href = "/login";
+  const handleLogout = async () => {
+    if (isLoggingOut) return; // Prevent double-click
+    
+    setIsLoggingOut(true);
+    
+    try {
+      const supabase = createClient();
+      
+      // Sign out from Supabase
+      const { error } = await supabase.auth.signOut();
+      
+      if (error) {
+        console.error("❌ Logout error:", error);
+        throw error;
+      }
+      
+      console.log("✅ Logged out successfully");
+      
+      // Redirect to login page
+      router.push("/login");
+      router.refresh();
+    } catch (error) {
+      console.error("Failed to logout:", error);
+      setIsLoggingOut(false);
+      // Still redirect even if error occurs
+      router.push("/login");
+    }
   };
 
   return (
@@ -116,7 +141,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               userRole="Practice Manager"
               onSettingsClick={() => {
                 console.log("Navigate to settings");
-                window.location.href = "/settings";
+                router.push("/settings");
               }}
               onSignOutClick={handleLogout}
             />
