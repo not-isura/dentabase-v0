@@ -3,6 +3,7 @@
 import React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Calendar, Users, FileText, TrendingUp, Clock, AlertCircle } from "lucide-react";
+import { DashboardMessageHandler } from "@/components/dashboard-message-handler";
 
 export default function DashboardPage() {
   const stats = [
@@ -48,6 +49,9 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* Message Handler */}
+      <DashboardMessageHandler />
+
       {/* Page Title */}
       <div>
         <h2 className="text-2xl font-bold text-[hsl(258_46%_25%)]">Overview</h2>

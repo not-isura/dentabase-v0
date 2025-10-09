@@ -1,23 +1,53 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert } from "@/components/ui/alert";
 import { Eye, EyeOff, AlertCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [messageVariant, setMessageVariant] = useState<"info" | "warning" | "success" | "error">("info");
+
+  // Get message from URL on mount
+  useEffect(() => {
+    const message = searchParams.get('message');
+    const type = searchParams.get('type'); // Get message type from URL
+    
+    if (message) {
+      setInfoMessage(decodeURIComponent(message));
+      
+      // Determine variant based on type parameter or message content
+      if (type === 'warning' || type === 'error') {
+        setMessageVariant('warning');
+      } else if (type === 'success') {
+        setMessageVariant('success');
+      } else if (message.toLowerCase().includes('login to continue') || message.toLowerCase().includes('session expired')) {
+        setMessageVariant('warning');
+      } else {
+        setMessageVariant('info');
+      }
+      
+      // Clear message from URL after 5 seconds
+      setTimeout(() => {
+        setInfoMessage(null);
+      }, 5000);
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,6 +143,13 @@ export default function LoginPage() {
           </CardHeader>
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-4">
+              {/* Info Message from URL */}
+              {infoMessage && (
+                <Alert variant={messageVariant}>
+                  {infoMessage}
+                </Alert>
+              )}
+
               {/* Error Message */}
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-md p-3 flex items-start gap-2">

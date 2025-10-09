@@ -2,9 +2,6 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function updateSession(request: NextRequest) {
-  // Log to verify middleware is running
-  console.log('🔧 Middleware running for:', request.nextUrl.pathname);
-  
   let supabaseResponse = NextResponse.next({
     request,
   })
@@ -30,8 +27,11 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  // refreshing the auth token
+  // IMPORTANT: Use getUser() not getSession() for security
+  // This refreshes the auth token and validates it with Supabase
   await supabase.auth.getUser()
 
+  // No redirects here - route protection is handled by RouteGuard/AuthGuard components
+  // This middleware only refreshes tokens and updates cookies
   return supabaseResponse
 }
