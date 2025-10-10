@@ -22,9 +22,9 @@ export async function AuthGuard({ children }: AuthGuardProps) {
   // Check if user is already authenticated
   const { data: { user } } = await supabase.auth.getUser()
   
-  // If user is logged in, redirect to dashboard with message
+  // If user is logged in, redirect to dashboard
   if (user) {
-    redirect('/dashboard?message=You are already logged in')
+    redirect('/dashboard')
   }
   
   // User is not logged in, show auth page

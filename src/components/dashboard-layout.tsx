@@ -52,8 +52,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       
       console.log("✅ Logged out successfully");
       
-      // Redirect to login page with success message
-      router.push("/login?type=success&message=You have been logged out successfully");
+      // Redirect to login page
+      router.push("/login");
       router.refresh();
     } catch (error) {
       console.error("Failed to logout:", error);

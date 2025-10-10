@@ -22,6 +22,8 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [messageVariant, setMessageVariant] = useState<"info" | "warning" | "success" | "error">("info");
+  const [showResendVerification, setShowResendVerification] = useState(false);
+  const [isResending, setIsResending] = useState(false);
 
   // Get message from URL on mount
   useEffect(() => {
@@ -64,6 +66,13 @@ export default function LoginPage() {
       });
 
       if (authError) {
+        // Handle specific error: Email not confirmed
+        if (authError.message.toLowerCase().includes('email not confirmed')) {
+          setShowResendVerification(true);
+          throw new Error(
+            "Please verify your email address. Check your inbox for a verification link, or click 'Resend verification email' below."
+          );
+        }
         throw new Error(authError.message);
       }
 
@@ -115,6 +124,46 @@ export default function LoginPage() {
     }
   };
 
+  const handleResendVerification = async () => {
+    if (!email) {
+      setError("Please enter your email address first");
+      return;
+    }
+
+    setIsResending(true);
+    setError(null);
+
+    try {
+      const supabase = createClient();
+      
+      const { error: resendError } = await supabase.auth.resend({
+        type: 'signup',
+        email: email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/dashboard`,
+        },
+      });
+
+      if (resendError) {
+        throw new Error(resendError.message);
+      }
+
+      setInfoMessage("Verification email sent! Please check your inbox.");
+      setMessageVariant("success");
+      setShowResendVerification(false);
+      
+      // Clear success message after 5 seconds
+      setTimeout(() => {
+        setInfoMessage(null);
+      }, 5000);
+    } catch (err) {
+      console.error("❌ Resend verification error:", err);
+      setError(err instanceof Error ? err.message : "Failed to resend verification email");
+    } finally {
+      setIsResending(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[hsl(258_46%_25%/0.1)] via-[hsl(330_100%_99%)] to-[hsl(36_60%_78%/0.1)] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -157,6 +206,18 @@ export default function LoginPage() {
                   <div className="flex-1">
                     <p className="text-sm text-red-800 font-medium">Login Failed</p>
                     <p className="text-sm text-red-700 mt-1">{error}</p>
+                    {showResendVerification && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 w-full text-[hsl(258_46%_25%)] border-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.1)]"
+                        onClick={handleResendVerification}
+                        disabled={isResending}
+                      >
+                        {isResending ? "Sending..." : "Resend Verification Email"}
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}
