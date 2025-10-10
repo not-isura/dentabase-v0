@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Navbar, NavbarRight, UserProfile } from "@/components/ui/navbar";
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -33,6 +34,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  
+  // 🎯 Get real user data from Auth Context
+  const { user, isLoading: isLoadingUser } = useAuth();
 
   const handleLogout = async () => {
     if (isLoggingOut) return; // Prevent double-click
@@ -136,9 +140,25 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         >
           <NavbarRight>
             <UserProfile 
-              userName="Dr. Sarah Wilson"
-              userEmail="sarah.wilson@dentabase.com"
-              userRole="Practice Manager"
+              userName={
+                isLoadingUser 
+                  ? "Loading..." 
+                  : user 
+                    ? `${user.first_name} ${user.last_name}` 
+                    : "Guest User"
+              }
+              userEmail={
+                isLoadingUser 
+                  ? "Loading..." 
+                  : user?.email || "Not logged in"
+              }
+              userRole={
+                isLoadingUser 
+                  ? "Loading..." 
+                  : user 
+                    ? user.role.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase()) 
+                    : "Guest"
+              }
               onSettingsClick={() => {
                 console.log("Navigate to settings");
                 router.push("/settings");

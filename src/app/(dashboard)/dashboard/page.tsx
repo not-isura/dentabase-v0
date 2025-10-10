@@ -2,10 +2,14 @@
 
 import React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Calendar, Users, FileText, TrendingUp, Clock, AlertCircle } from "lucide-react";
+import { Calendar, Users, FileText, TrendingUp, Clock, AlertCircle, Sparkles } from "lucide-react";
 import { DashboardMessageHandler } from "@/components/dashboard-message-handler";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function DashboardPage() {
+  // 🎯 Get real user data from Auth Context
+  const { user, isLoading: isLoadingUser } = useAuth();
+
   const stats = [
     {
       title: "Today's Appointments",
@@ -52,10 +56,30 @@ export default function DashboardPage() {
       {/* Message Handler */}
       <DashboardMessageHandler />
 
+      {/* Personalized Welcome Section */}
+      <div className="bg-gradient-to-r from-[hsl(258_46%_25%)] to-[hsl(258_46%_30%)] rounded-lg p-6 text-white">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold flex items-center">
+              {isLoadingUser ? (
+                "Loading..."
+              ) : user ? (
+                <>
+                  <Sparkles className="h-8 w-8 mr-3" />
+                  Welcome back, {user.first_name}!
+                </>
+              ) : (
+                "Welcome to Dentabase"
+              )}
+            </h1>
+          </div>
+        </div>
+      </div>
+
       {/* Page Title */}
       <div>
         <h2 className="text-2xl font-bold text-[hsl(258_46%_25%)]">Overview</h2>
-        <p className="text-[hsl(258_22%_50%)]">Welcome back! Here's what's happening in your practice today.</p>
+        <p className="text-[hsl(258_22%_50%)]">Here's what's happening in your practice today.</p>
       </div>
 
       {/* Stats Grid */}
