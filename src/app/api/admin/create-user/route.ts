@@ -16,7 +16,7 @@ const supabaseAdmin = createClient(
 
 export async function POST(request: NextRequest) {
   try {
-    // 1. Verify the requesting user is an admin
+    // 1. Verify the requesting user is an admin (RLS-based)
     const supabase = await createServerClient();
 
     const {
@@ -31,14 +31,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if requesting user is admin
+    // Check if requesting user is admin - RLS will block if not admin
     const { data: userData, error: userError } = await supabase
       .from('users')
       .select('role')
       .eq('auth_id', requestingUser.id)
       .single();
 
-    if (userError || userData?.role !== 'admin') {
+    // If RLS blocks or role is not admin, return 403
+    if (userError || !userData || userData.role !== 'admin') {
+      console.error('RLS restriction or not admin:', userError);
       return NextResponse.json(
         { error: 'Forbidden - Admin access required' },
         { status: 403 }

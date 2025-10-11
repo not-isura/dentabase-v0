@@ -1,11 +1,13 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Shield, Key, Eye, EyeOff, FileText, UserCheck, Trash2, X, Check, CheckCircle2 } from "lucide-react";
+import { Shield, Key, Eye, EyeOff, FileText, UserCheck, Trash2, X, Check, CheckCircle2, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function PrivacyPage() {
+  const router = useRouter();
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -34,6 +36,18 @@ export default function PrivacyPage() {
 
   return (
     <div className="space-y-6">
+      {/* Breadcrumb Navigation */}
+      <div className="flex items-center gap-2 text-sm">
+        <button
+          onClick={() => router.push('/settings')}
+          className="text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] transition-colors cursor-pointer font-medium"
+        >
+          Settings
+        </button>
+        <ChevronRight className="h-4 w-4 text-[hsl(258_22%_40%)]" />
+        <span className="text-[hsl(258_46%_25%)] font-semibold">Privacy & Security</span>
+      </div>
+
       {/* Page Title */}
       <div>
         <h2 className="text-2xl font-bold text-[hsl(258_46%_25%)]">Privacy & Security</h2>

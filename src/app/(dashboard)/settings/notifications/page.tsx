@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Bell, Settings as SettingsIcon, Volume2, Mail, Smartphone, ArrowLeft } from "lucide-react";
+import { Bell, Settings as SettingsIcon, Volume2, Mail, Smartphone, ArrowLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 
@@ -11,16 +11,15 @@ export default function SettingsNotificationsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center space-x-4">
-        <Button
-          variant="ghost"
-          size="sm"
+      <div className="flex items-center gap-2 text-sm">
+        <button
           onClick={() => router.push("/settings")}
-          className="text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.1)]"
+          className="text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] transition-colors cursor-pointer font-medium"
         >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Settings
-        </Button>
+          Settings
+        </button>
+        <ChevronRight className="h-4 w-4 text-[hsl(258_22%_40%)]" />
+        <span className="text-[hsl(258_46%_25%)] font-semibold">Notifications</span>
       </div>
 
       <div>

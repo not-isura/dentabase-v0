@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
   ArrowLeft, 
+  ChevronRight,
   User, 
   Mail, 
   Phone, 
@@ -116,16 +117,15 @@ export default function SettingsProfilePage() {
   if (isLoadingAuth) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center space-x-4">
-          <Button
-            variant="ghost"
-            size="sm"
+        <div className="flex items-center gap-2 text-sm">
+          <button
             onClick={() => router.push("/settings")}
-            className="text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.1)]"
+            className="text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] transition-colors cursor-pointer font-medium"
           >
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Settings
-          </Button>
+            Settings
+          </button>
+          <ChevronRight className="h-4 w-4 text-[hsl(258_22%_40%)]" />
+          <span className="text-[hsl(258_46%_25%)] font-semibold">My Profile</span>
         </div>
 
         <div>
@@ -162,17 +162,16 @@ export default function SettingsProfilePage() {
 
   return (
     <div className="space-y-6">
-      {/* Back Button */}
-      <div className="flex items-center space-x-4">
-        <Button
-          variant="ghost"
-          size="sm"
+      {/* Breadcrumb Navigation */}
+      <div className="flex items-center gap-2 text-sm">
+        <button
           onClick={() => router.push("/settings")}
-          className="text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.1)]"
+          className="text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] transition-colors cursor-pointer font-medium"
         >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Settings
-        </Button>
+          Settings
+        </button>
+        <ChevronRight className="h-4 w-4 text-[hsl(258_22%_40%)]" />
+        <span className="text-[hsl(258_46%_25%)] font-semibold">My Profile</span>
       </div>
 
       {/* Page Title */}

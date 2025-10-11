@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +18,13 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
-  X
+  X,
+  Edit2,
+  Trash2,
+  Filter,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
@@ -88,18 +94,90 @@ const ROLE_LABEL_MAP: Record<UserRole, string> = {
 
 interface ExistingUser {
   user_id: string;
+  auth_id: string;
   first_name: string;
   middle_name?: string;
   last_name: string;
   email: string;
-  role: string;
-  status: string;
+  phone_number?: string;
+  gender: string;
+  role: UserRole;
+  status: AccountStatus;
   created_at: string;
+  updated_at?: string;
+  roleData?: any;
+}
+
+interface EditUserData extends NewAccount {
+  user_id: string;
+}
+
+// Custom Dropdown Component
+interface CustomDropdownProps {
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+  icon?: React.ReactNode;
+  className?: string;
+}
+
+function CustomDropdown({ value, onChange, options, placeholder, icon, className = '' }: CustomDropdownProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedOption = options.find(opt => opt.value === value);
+
+  return (
+    <div ref={dropdownRef} className={`relative ${className}`}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="h-10 w-full pl-10 pr-4 rounded-lg border-2 border-[hsl(258_22%_90%)] bg-white py-2 text-sm text-[hsl(258_46%_25%)] font-medium hover:border-[hsl(258_46%_25%/0.5)] hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.2)] focus:border-[hsl(258_46%_25%)] transition-all cursor-pointer text-left flex items-center active:scale-[0.98]"
+      >
+        {icon && <span className="absolute left-3">{icon}</span>}
+        <span>{selectedOption?.label || placeholder}</span>
+      </button>
+
+      {isOpen && (
+        <div className="absolute z-50 mt-2 w-full bg-white border-2 border-[hsl(258_46%_25%/0.2)] rounded-lg shadow-lg overflow-hidden">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => {
+                onChange(option.value);
+                setIsOpen(false);
+              }}
+              className={`w-full px-4 py-2.5 text-left text-sm transition-all cursor-pointer active:scale-[0.98] ${
+                option.value === value
+                  ? 'bg-[hsl(258_46%_25%)] text-white font-semibold'
+                  : 'text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_95%)] font-medium'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function AccountManagementPage() {
   const router = useRouter();
-  const { user, isLoading: isLoadingAuth } = useAuth();
+  const { user: currentUser, isLoading: isLoadingAuth } = useAuth();
   
   const [activeTab, setActiveTab] = useState<'create' | 'manage'>('create');
   const [showPassword, setShowPassword] = useState(false);
@@ -107,46 +185,228 @@ export default function AccountManagementPage() {
   const [newAccount, setNewAccount] = useState<NewAccount>(INITIAL_ACCOUNT_STATE);
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
-  // Mock data for existing users - in real app, this would come from Supabase
-  const [existingUsers] = useState<ExistingUser[]>([
-    {
-      user_id: '1',
-      first_name: 'Dr. Sarah',
-      last_name: 'Johnson',
-      email: 'sarah.johnson@dentabase.com',
-      role: 'dentist',
-      status: 'active',
-      created_at: '2024-09-01T10:00:00Z'
-    },
-    {
-      user_id: '2',
-      first_name: 'Maria',
-      last_name: 'Rodriguez',
-      email: 'maria.rodriguez@dentabase.com',
-      role: 'dental_staff',
-      status: 'active',
-      created_at: '2024-09-15T14:30:00Z'
-    }
-  ]);
+  // Manage Users Tab State
+  const [existingUsers, setExistingUsers] = useState<ExistingUser[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [searchInput, setSearchInput] = useState(''); // Input field value
+  const [searchQuery, setSearchQuery] = useState(''); // Actual search query sent to API
+  const [roleFilter, setRoleFilter] = useState<'all' | UserRole>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | AccountStatus>('all');
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<EditUserData | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isViewMode, setIsViewMode] = useState(true); // true = view mode, false = edit mode
+  
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
 
   // Protect route - redirect non-admins
   useEffect(() => {
-    if (!isLoadingAuth && user && user.role !== 'admin') {
+    if (!isLoadingAuth && currentUser && currentUser.role !== 'admin') {
       router.push('/404');
     }
-  }, [user, isLoadingAuth, router]);
+  }, [currentUser, isLoadingAuth, router]);
+
+  // Fetch users when manage tab is active
+  useEffect(() => {
+    if (activeTab === 'manage' && currentUser?.role === 'admin') {
+      fetchUsers();
+      setCurrentPage(1); // Reset to first page when filters change
+    }
+  }, [activeTab, roleFilter, statusFilter, searchQuery]);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(existingUsers.length / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedUsers = existingUsers.slice(startIndex, endIndex);
+
+  // Pagination handlers
+  const goToNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
+
+  const goToPreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
 
   // Show loading state while checking auth or if unauthorized
-  if (isLoadingAuth || !user || user.role !== 'admin') {
+  if (isLoadingAuth || !currentUser || currentUser.role !== 'admin') {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-[hsl(258_46%_25%)] border-t-transparent mx-auto mb-4" />
+          {/* Pulsating logo loading animation */}
+          <div className="relative w-24 h-24 mx-auto mb-6">
+            {/* Outer ripple rings - pulse outward */}
+            <div className="absolute inset-0 rounded-full bg-[hsl(258_46%_25%)] opacity-20 animate-ping"></div>
+            <div className="absolute inset-0 rounded-full bg-[hsl(258_46%_25%)] opacity-10 animate-pulse"></div>
+            
+            {/* Solid purple circle */}
+            <div className="absolute inset-2 bg-[hsl(258_46%_25%)] rounded-full flex items-center justify-center">
+              {/* Logo with fade animation */}
+              <div className="animate-fade-in-out">
+                <img
+                  src="/logo-white-outline.png"
+                  alt="Loading"
+                  className="w-12 h-12 object-contain"
+                />
+              </div>
+            </div>
+          </div>
+          
           <p className="text-[hsl(258_22%_50%)]">Loading...</p>
         </div>
       </div>
     );
   }
+
+  // Fetch users from API
+  const fetchUsers = async () => {
+    setIsLoadingUsers(true);
+    try {
+      const params = new URLSearchParams();
+      if (roleFilter !== 'all') params.append('role', roleFilter);
+      if (statusFilter !== 'all') params.append('status', statusFilter);
+      if (searchQuery) params.append('search', searchQuery);
+
+      const response = await fetch(`/api/admin/users?${params.toString()}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        setExistingUsers(data.users || []);
+      } else {
+        showNotification('error', 'Failed to Load Users', data.error || 'Could not fetch users');
+        setExistingUsers([]);
+      }
+    } catch (error: any) {
+      showNotification('error', 'Network Error', 'Failed to connect to server');
+      setExistingUsers([]);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  // Fetch single user details for editing/viewing
+  const fetchUserDetails = async (userId: string, viewMode: boolean = true) => {
+    // Open modal immediately with loading state
+    setShowEditDialog(true);
+    setIsViewMode(viewMode);
+    setSelectedUser(null); // Clear previous data to show loading
+    
+    try {
+      const response = await fetch(`/api/admin/users/${userId}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        const user = data.user;
+        const roleData = user.roleData || {};
+        
+        setSelectedUser({
+          user_id: user.user_id,
+          firstName: user.first_name,
+          middleName: user.middle_name || '',
+          lastName: user.last_name,
+          email: user.email,
+          tempPassword: 'dentabase2025',
+          phoneNumber: user.phone_number || '',
+          gender: user.gender,
+          role: user.role,
+          status: user.status,
+          emailVerified: true,
+          specialization: roleData.specialization || '',
+          licenseNumber: roleData.license_number || '',
+          clinicAssignment: roleData.clinic_assignment || '',
+          scheduleAvailability: roleData.schedule_availability || '',
+          designation: roleData.designation || '',
+          assignedDoctor: roleData.assigned_doctor || '',
+          address: roleData.address || '',
+          emergencyContactName: roleData.emergency_contact_name || '',
+          emergencyContactNo: roleData.emergency_contact_no || ''
+        });
+      } else {
+        setShowEditDialog(false); // Close modal on error
+        showNotification('error', 'Failed to Load User', data.error || 'Could not fetch user details');
+      }
+    } catch (error: any) {
+      setShowEditDialog(false); // Close modal on error
+      showNotification('error', 'Network Error', 'Failed to connect to server');
+    }
+  };
+
+  // Update user
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUser) return;
+
+    setIsUpdating(true);
+    try {
+      const response = await fetch(`/api/admin/users/${selectedUser.user_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(selectedUser)
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        showNotification(
+          'success',
+          'User Updated Successfully',
+          `${selectedUser.firstName} ${selectedUser.lastName}'s information has been updated.`
+        );
+        setShowEditDialog(false);
+        setSelectedUser(null);
+        setIsViewMode(true); // Reset view mode
+        fetchUsers(); // Refresh the list
+      } else {
+        showNotification('error', 'Failed to Update User', data.error || 'Could not update user');
+      }
+    } catch (error: any) {
+      showNotification('error', 'Network Error', 'Failed to connect to server');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  // Delete user
+  const handleDeleteUser = async () => {
+    if (!selectedUser) return;
+
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`/api/admin/users?userId=${selectedUser.user_id}`, {
+        method: 'DELETE'
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        showNotification(
+          'success',
+          'User Deleted Successfully',
+          `${selectedUser.firstName} ${selectedUser.lastName} has been removed from the system.`
+        );
+        setShowDeleteDialog(false);
+        setShowEditDialog(false); // Also close the view/edit dialog
+        setSelectedUser(null);
+        setIsViewMode(true); // Reset view mode
+        fetchUsers(); // Refresh the list
+      } else {
+        showNotification('error', 'Failed to Delete User', data.error || 'Could not delete user');
+      }
+    } catch (error: any) {
+      showNotification('error', 'Network Error', 'Failed to connect to server');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // Notification helpers
   const showNotification = (type: 'success' | 'error' | 'info', title: string, message: string, details?: string[]) => {
@@ -161,6 +421,17 @@ export default function AccountManagementPage() {
 
   const dismissNotification = (id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
+  };
+
+  const handleSearch = () => {
+    setSearchQuery(searchInput);
+    setCurrentPage(1); // Reset to first page when searching
+  };
+
+  const handleSearchKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
   };
 
   const handleInputChange = (field: keyof NewAccount, value: string) => {
@@ -284,14 +555,26 @@ export default function AccountManagementPage() {
       .join(" ");
   };
 
+  const formatMiddleInitial = (middleName: string) => {
+    if (!middleName || middleName.trim() === '') return '';
+    
+    // Split by spaces to handle multiple middle names (e.g., "Dela Cruz" -> "D.C.")
+    const parts = middleName.trim().split(/\s+/);
+    const initials = parts.map(part => part.charAt(0).toUpperCase() + '.').join('');
+    
+    return initials;
+  };
+
   const getRoleBadgeStyles = (role: string) => {
     switch (role) {
+      case "admin":
+        return "bg-orange-100 text-orange-800";
       case "dentist":
-        return "bg-[hsl(258_46%_25%/0.1)] text-[hsl(258_46%_25%)]";
+        return "bg-purple-100 text-purple-800";
       case "dental_staff":
         return "bg-blue-100 text-blue-800";
-      case "admin":
-        return "bg-amber-100 text-amber-800";
+      case "patient":
+        return "bg-gray-100 text-gray-700";
       default:
         return "bg-gray-100 text-gray-700";
     }
@@ -299,6 +582,34 @@ export default function AccountManagementPage() {
 
   return (
     <div className="space-y-6">
+      {/* Custom styles for select dropdowns */}
+      <style jsx global>{`
+        select.filter-select option {
+          padding: 10px 16px;
+          background-color: white;
+          color: hsl(258, 46%, 25%);
+          font-size: 14px;
+        }
+        
+        select.filter-select option:hover {
+          background-color: hsl(258, 46%, 95%);
+          color: hsl(258, 46%, 25%);
+        }
+        
+        select.filter-select option:checked {
+          background-color: hsl(258, 46%, 25%);
+          color: white;
+          font-weight: 600;
+        }
+        
+        /* Firefox-specific styles */
+        @-moz-document url-prefix() {
+          select.filter-select option:checked {
+            background: hsl(258, 46%, 25%) linear-gradient(0deg, hsl(258, 46%, 25%) 0%, hsl(258, 46%, 25%) 100%);
+          }
+        }
+      `}</style>
+
       {/* Notification Stack - Fixed Position */}
       <div className="fixed bottom-4 right-4 z-50 space-y-3 max-w-md">
         {notifications.map((notification) => (
@@ -368,7 +679,7 @@ export default function AccountManagementPage() {
               </div>
               <button
                 onClick={() => dismissNotification(notification.id)}
-                className={`flex-shrink-0 rounded-md p-1 hover:bg-white/50 transition-colors ${
+                className={`flex-shrink-0 rounded-md p-1 hover:bg-white/50 transition-all cursor-pointer active:scale-90 ${
                   notification.type === 'success'
                     ? 'text-green-600'
                     : notification.type === 'error'
@@ -383,17 +694,16 @@ export default function AccountManagementPage() {
         ))}
       </div>
 
-      {/* Header with Back Button */}
-      <div className="flex items-center space-x-4">
-        <Button 
-          variant="ghost" 
-          size="sm"
+      {/* Breadcrumb Navigation */}
+      <div className="flex items-center gap-2 text-sm">
+        <button
           onClick={() => router.push('/settings')}
-          className="text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.1)]"
+          className="text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] transition-colors cursor-pointer font-medium"
         >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Settings
-        </Button>
+          Settings
+        </button>
+        <ChevronRight className="h-4 w-4 text-[hsl(258_22%_40%)]" />
+        <span className="text-[hsl(258_46%_25%)] font-semibold">Account Management</span>
       </div>
 
       {/* Page Title */}
@@ -408,36 +718,50 @@ export default function AccountManagementPage() {
 
 
       {/* Tab Navigation */}
-      <div className="border-b border-[hsl(258_22%_90%)]">
-        <nav className="flex space-x-8">
+      <div className="border-b border-gray-200">
+        <nav
+          role="tablist"
+          aria-label="Account management navigation"
+          className="flex gap-2 md:gap-3 py-0"
+        >
           <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'create'}
+            aria-controls="tab-create-panel"
+            id="tab-create"
             onClick={() => setActiveTab('create')}
-            className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+            className={`inline-flex items-center gap-2 px-4 py-2 -mb-[1px] rounded-t-md text-sm font-medium cursor-pointer select-none transition-colors transition-transform duration-200 ease-in-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 ${
               activeTab === 'create'
-                ? 'border-[hsl(258_46%_25%)] text-[hsl(258_46%_25%)]'
-                : 'border-transparent text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] hover:border-[hsl(258_22%_90%)]'
+                ? 'bg-[hsl(258_46%_25%)] text-white border-b-2 border-white/90'
+                : 'text-gray-700 hover:text-purple-800 hover:bg-purple-100'
             }`}
           >
-            <UserPlus className="h-4 w-4 inline mr-2" />
-            Create Accounts
+            <UserPlus className="h-4 w-4" />
+            <span>Create Accounts</span>
           </button>
           <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'manage'}
+            aria-controls="tab-manage-panel"
+            id="tab-manage"
             onClick={() => setActiveTab('manage')}
-            className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+            className={`inline-flex items-center gap-2 px-4 py-2 -mb-[1px] rounded-t-md text-sm font-medium cursor-pointer select-none transition-colors transition-transform duration-200 ease-in-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 ${
               activeTab === 'manage'
-                ? 'border-[hsl(258_46%_25%)] text-[hsl(258_46%_25%)]'
-                : 'border-transparent text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] hover:border-[hsl(258_22%_90%)]'
+                ? 'bg-[hsl(258_46%_25%)] text-white border-b-2 border-white/90'
+                : 'text-gray-700 hover:text-purple-800 hover:bg-purple-100'
             }`}
           >
-            <UserCheck className="h-4 w-4 inline mr-2" />
-            Manage Users
+            <UserCheck className="h-4 w-4" />
+            <span>Manage Users</span>
           </button>
         </nav>
       </div>
 
       {/* Create Accounts Tab */}
       {activeTab === "create" && (
-        <div className="space-y-6">
+        <div id="tab-create-panel" aria-labelledby="tab-create" role="tabpanel" className="space-y-6">
           <Card className="mx-auto max-w-4xl bg-white">
             <CardHeader>
               <CardTitle className="text-[hsl(258_46%_25%)] flex items-center gap-2">
@@ -736,7 +1060,7 @@ export default function AccountManagementPage() {
                   <Button
                     type="submit"
                     disabled={isSaving}
-                    className="bg-[hsl(258_46%_25%)] px-6 text-white hover:bg-[hsl(258_46%_22%)]"
+                    className="bg-[hsl(258_46%_25%)] px-6 text-white hover:bg-[hsl(258_46%_22%)] cursor-pointer active:scale-95 transition-transform disabled:cursor-not-allowed"
                   >
                     {isSaving ? (
                       <>
@@ -759,22 +1083,70 @@ export default function AccountManagementPage() {
 
       {/* Manage Users Tab */}
       {activeTab === 'manage' && (
-        <div className="space-y-6">
+        <div id="tab-manage-panel" aria-labelledby="tab-manage" role="tabpanel" className="space-y-6">
           {/* Search and Filters */}
           <Card className="bg-white">
             <CardContent className="p-4">
-              <div className="flex items-center space-x-4">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-[hsl(258_22%_50%)]" />
-                  <Input
-                    placeholder="Search users by name or email..."
-                    className="pl-10"
-                  />
+              <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4">
+                <div className="relative flex-1 flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-[hsl(258_22%_50%)]" />
+                    <Input
+                      placeholder="Search users by name or email..."
+                      className="pl-10"
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      onKeyPress={handleSearchKeyPress}
+                    />
+                  </div>
+                  <Button
+                    onClick={handleSearch}
+                    disabled={isLoadingUsers}
+                    className="h-10 bg-[hsl(258_46%_25%)] text-white hover:bg-[hsl(258_46%_22%)] cursor-pointer active:scale-95 transition-transform disabled:cursor-not-allowed"
+                  >
+                    <Search className="h-4 w-4 mr-2" />
+                    Search
+                  </Button>
                 </div>
-                <Button variant="outline">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add User
-                </Button>
+                
+                <div className="flex items-center gap-2">
+                  {/* Role Filter - Custom Dropdown */}
+                  <CustomDropdown
+                    value={roleFilter}
+                    onChange={(value) => setRoleFilter(value as any)}
+                    options={[
+                      { value: 'all', label: 'All Roles' },
+                      { value: 'admin', label: 'Admin' },
+                      { value: 'dentist', label: 'Dentist' },
+                      { value: 'dental_staff', label: 'Dental Staff' },
+                      { value: 'patient', label: 'Patient' }
+                    ]}
+                    icon={<Filter className="h-4 w-4 text-[hsl(258_22%_50%)]" />}
+                    className="min-w-[140px]"
+                  />
+
+                  {/* Status Filter - Custom Dropdown */}
+                  <CustomDropdown
+                    value={statusFilter}
+                    onChange={(value) => setStatusFilter(value as any)}
+                    options={[
+                      { value: 'all', label: 'All Status' },
+                      { value: 'active', label: 'Active' },
+                      { value: 'inactive', label: 'Inactive' }
+                    ]}
+                    icon={<Filter className="h-4 w-4 text-[hsl(258_22%_50%)]" />}
+                    className="min-w-[130px]"
+                  />
+
+                  <Button 
+                    variant="outline"
+                    onClick={fetchUsers}
+                    disabled={isLoadingUsers}
+                    className="h-10 cursor-pointer active:scale-95 transition-transform disabled:cursor-not-allowed hover:bg-[hsl(258_46%_25%/0.05)]"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isLoadingUsers ? 'animate-spin' : ''}`} />
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -782,68 +1154,600 @@ export default function AccountManagementPage() {
           {/* Users Table */}
           <Card className="bg-white">
             <CardHeader>
-              <CardTitle className="text-[hsl(258_46%_25%)]">Existing Users</CardTitle>
-              <CardDescription>Manage existing dentist and staff accounts</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-[hsl(258_46%_25%)]">All Users</CardTitle>
+                  <CardDescription>
+                    {isLoadingUsers ? 'Loading users...' : `${existingUsers.length} user(s) found`}
+                  </CardDescription>
+                </div>
+                
+                {/* Page Navigator - Top Right */}
+                {!isLoadingUsers && existingUsers.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={goToPreviousPage}
+                      disabled={currentPage === 1}
+                      className="h-8 w-8 p-0 cursor-pointer active:scale-90 transition-transform disabled:cursor-not-allowed hover:bg-[hsl(258_46%_25%/0.05)]"
+                      title="Previous page"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    
+                    <div className="text-sm font-medium text-[hsl(258_46%_25%)] min-w-[100px] text-center">
+                      Page <span className="font-semibold">{currentPage}</span> of <span className="font-semibold">{totalPages}</span>
+                    </div>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={goToNextPage}
+                      disabled={currentPage === totalPages}
+                      className="h-8 w-8 p-0 cursor-pointer active:scale-90 transition-transform disabled:cursor-not-allowed hover:bg-[hsl(258_46%_25%/0.05)]"
+                      title="Next page"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-[hsl(258_22%_90%)]">
-                      <th className="text-left py-3 px-4 font-medium text-[hsl(258_46%_25%)]">Name</th>
-                      <th className="text-left py-3 px-4 font-medium text-[hsl(258_46%_25%)]">Email</th>
-                      <th className="text-left py-3 px-4 font-medium text-[hsl(258_46%_25%)]">Role</th>
-                      <th className="text-left py-3 px-4 font-medium text-[hsl(258_46%_25%)]">Status</th>
-                      <th className="text-left py-3 px-4 font-medium text-[hsl(258_46%_25%)]">Created</th>
-                      <th className="text-left py-3 px-4 font-medium text-[hsl(258_46%_25%)]">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {existingUsers.map((user) => (
-                      <tr key={user.user_id} className="border-b border-[hsl(258_22%_90%)] hover:bg-[hsl(258_46%_25%/0.02)]">
-                        <td className="py-3 px-4">
-                          <div className="font-medium text-[hsl(258_46%_25%)]">
-                            {user.first_name} {user.middle_name} {user.last_name}
-                          </div>
-                        </td>
-                        <td className="py-3 px-4 text-[hsl(258_22%_50%)]">{user.email}</td>
-                        <td className="py-3 px-4">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getRoleBadgeStyles(user.role)}`}>
-                            {formatRoleLabel(user.role)}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            user.status === 'active' 
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-red-100 text-red-800'
-                          }`}>
-                            {user.status.charAt(0).toUpperCase() + user.status.slice(1)}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-[hsl(258_22%_50%)]">
-                          {new Date(user.created_at).toLocaleDateString()}
-                        </td>
-                        <td className="py-3 px-4">
-                          <button className="p-1 hover:bg-[hsl(258_46%_25%/0.1)] rounded">
-                            <MoreVertical className="h-4 w-4 text-[hsl(258_22%_50%)]" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              
-              {existingUsers.length === 0 && (
-                <div className="text-center py-8 text-[hsl(258_22%_50%)]">
-                  <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>No users found</p>
-                  <p className="text-sm mt-1">Create your first user account to get started</p>
+              {isLoadingUsers ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    {/* Loading animation with ripple effect - matches auth loading */}
+                    <div className="relative w-24 h-24 mx-auto mb-6">
+                      {/* Outer ripple rings - pulse outward */}
+                      <div className="absolute inset-0 rounded-full bg-[hsl(258_46%_25%)] opacity-20 animate-ping"></div>
+                      <div className="absolute inset-0 rounded-full bg-[hsl(258_46%_25%)] opacity-10 animate-pulse"></div>
+                      
+                      {/* Solid purple circle */}
+                      <div className="absolute inset-2 bg-[hsl(258_46%_25%)] rounded-full flex items-center justify-center">
+                        {/* Logo with fade animation */}
+                        <div className="animate-fade-in-out">
+                          <img
+                            src="/logo-white-outline.png"
+                            alt="Loading"
+                            className="w-12 h-12 object-contain"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Loading text */}
+                    <p className="text-[hsl(258_22%_50%)]">Loading users...</p>
+                  </div>
                 </div>
+              ) : existingUsers.length === 0 ? (
+                <div className="text-center py-12 text-[hsl(258_22%_50%)]">
+                  <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p className="font-medium">No users found</p>
+                  <p className="text-sm mt-1">Try adjusting your search or filters</p>
+                </div>
+              ) : (
+                <>
+
+                  {/* Users Table */}
+                  <div className="overflow-x-auto">
+                  <table className="w-full table-fixed">
+                    <colgroup>
+                      <col style={{ width: '35%' }} />
+                      <col style={{ width: '18%' }} />
+                      <col style={{ width: '15%' }} />
+                      <col style={{ width: '17%' }} />
+                      <col style={{ width: '15%' }} />
+                    </colgroup>
+                    <thead>
+                      <tr className="border-b border-[hsl(258_22%_90%)]">
+                        <th className="text-left py-3 px-4 font-medium text-[hsl(258_46%_25%)]">Name</th>
+                        <th className="text-center py-3 px-4 font-medium text-[hsl(258_46%_25%)]">Role</th>
+                        <th className="text-center py-3 px-4 font-medium text-[hsl(258_46%_25%)]">Status</th>
+                        <th className="text-center py-3 px-4 font-medium text-[hsl(258_46%_25%)]">Created</th>
+                        <th className="text-center py-3 px-4 font-medium text-[hsl(258_46%_25%)]">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedUsers.map((user) => (
+                        <tr 
+                          key={user.user_id} 
+                          onClick={() => fetchUserDetails(user.user_id, true)}
+                          className="border-b border-[hsl(258_22%_90%)] hover:bg-[hsl(258_46%_25%/0.05)] cursor-pointer transition-all active:bg-[hsl(258_46%_25%/0.08)]"
+                        >
+                          <td className="py-3 px-4">
+                            <div className="font-medium text-[hsl(258_46%_25%)] truncate">
+                              {user.first_name} {user.middle_name ? formatMiddleInitial(user.middle_name) + ' ' : ''}{user.last_name}
+                            </div>
+                            {user.email && (
+                              <div className="text-xs text-[hsl(258_22%_50%)] truncate">{user.email}</div>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex justify-center">
+                              <span className={`inline-flex items-center justify-center px-3 py-0.5 rounded-full text-xs font-medium min-w-[80px] ${getRoleBadgeStyles(user.role)}`}>
+                                {formatRoleLabel(user.role)}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex justify-center">
+                              <span className={`inline-flex items-center justify-center px-3 py-0.5 rounded-full text-xs font-medium min-w-[70px] ${
+                                user.status === 'active' 
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}>
+                                {user.status.charAt(0).toUpperCase() + user.status.slice(1)}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-center text-sm text-[hsl(258_22%_50%)]">
+                            {new Date(user.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center justify-center gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation(); // Prevent row click
+                                  fetchUserDetails(user.user_id, false); // Open in edit mode
+                                }}
+                                className="h-8 w-8 p-0 hover:bg-[hsl(258_46%_25%/0.1)] cursor-pointer active:scale-90 transition-transform"
+                                title="Edit user"
+                              >
+                                <Edit2 className="h-4 w-4 text-[hsl(258_46%_25%)]" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation(); // Prevent row click
+                                  setSelectedUser({
+                                    user_id: user.user_id,
+                                    firstName: user.first_name,
+                                    middleName: user.middle_name || '',
+                                    lastName: user.last_name,
+                                    email: user.email,
+                                    tempPassword: '',
+                                    phoneNumber: '',
+                                    gender: user.gender as any,
+                                    role: user.role,
+                                    status: user.status,
+                                    emailVerified: true,
+                                    specialization: '',
+                                    licenseNumber: '',
+                                    clinicAssignment: '',
+                                    scheduleAvailability: '',
+                                    designation: '',
+                                    assignedDoctor: '',
+                                    address: '',
+                                    emergencyContactName: '',
+                                    emergencyContactNo: ''
+                                  });
+                                  setShowDeleteDialog(true);
+                                }}
+                                disabled={user.auth_id === currentUser?.auth_id}
+                                className={`h-8 w-8 p-0 transition-transform ${user.auth_id === currentUser?.auth_id ? 'cursor-not-allowed opacity-50' : 'hover:bg-red-50 cursor-pointer active:scale-90'}`}
+                                title={user.auth_id === currentUser?.auth_id ? "Cannot delete yourself" : "Delete user"}
+                              >
+                                <Trash2 className={`h-4 w-4 ${user.auth_id === currentUser?.auth_id ? 'text-gray-300' : 'text-red-600'}`} />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination Controls - Bottom */}
+                <div className="mt-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-4">
+                  <div className="text-sm font-medium text-[hsl(258_46%_25%)]">
+                    Showing <span className="font-semibold">{startIndex + 1}</span> to <span className="font-semibold">{Math.min(endIndex, existingUsers.length)}</span> of <span className="font-semibold">{existingUsers.length}</span> users
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={goToPreviousPage}
+                      disabled={currentPage === 1}
+                      className="h-9 w-9 p-0"
+                      title="Previous page"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    
+                    <div className="text-sm font-medium text-[hsl(258_46%_25%)] min-w-[100px] text-center">
+                      Page <span className="font-semibold">{currentPage}</span> of <span className="font-semibold">{totalPages}</span>
+                    </div>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={goToNextPage}
+                      disabled={currentPage === totalPages}
+                      className="h-9 w-9 p-0"
+                      title="Next page"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                </>
               )}
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* View/Edit User Dialog */}
+      {showEditDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-[hsl(258_22%_90%)] p-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-semibold text-[hsl(258_46%_25%)]">
+                  {isViewMode ? 'User Details' : 'Edit User'}
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowEditDialog(false);
+                    setSelectedUser(null);
+                    setIsViewMode(true);
+                  }}
+                  className="text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] cursor-pointer active:scale-90 transition-all"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            {!selectedUser ? (
+              /* Loading State */
+              <div className="flex items-center justify-center py-20">
+                <div className="text-center">
+                  {/* Pulsating logo loading animation */}
+                  <div className="relative w-24 h-24 mx-auto mb-6">
+                    {/* Outer ripple rings - pulse outward */}
+                    <div className="absolute inset-0 rounded-full bg-[hsl(258_46%_25%)] opacity-20 animate-ping"></div>
+                    <div className="absolute inset-0 rounded-full bg-[hsl(258_46%_25%)] opacity-10 animate-pulse"></div>
+                    
+                    {/* Solid purple circle */}
+                    <div className="absolute inset-2 bg-[hsl(258_46%_25%)] rounded-full flex items-center justify-center">
+                      {/* Logo with fade animation */}
+                      <div className="animate-fade-in-out">
+                        <img
+                          src="/logo-white-outline.png"
+                          alt="Loading"
+                          className="w-12 h-12 object-contain"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <p className="text-[hsl(258_22%_50%)]">Loading user details...</p>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleUpdateUser} className="p-6 space-y-6">
+              {/* Basic Information */}
+              <div className="space-y-4">
+                <h4 className="text-sm font-semibold uppercase tracking-wide text-[hsl(258_22%_50%)]">
+                  Basic Information
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="edit-firstName">First Name <span className="text-red-500">*</span></Label>
+                    <Input
+                      id="edit-firstName"
+                      value={selectedUser.firstName}
+                      onChange={(e) => setSelectedUser({ ...selectedUser, firstName: e.target.value })}
+                      required
+                      disabled={isViewMode}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-lastName">Last Name <span className="text-red-500">*</span></Label>
+                    <Input
+                      id="edit-lastName"
+                      value={selectedUser.lastName}
+                      onChange={(e) => setSelectedUser({ ...selectedUser, lastName: e.target.value })}
+                      required
+                      disabled={isViewMode}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-middleName">Middle Name</Label>
+                    <Input
+                      id="edit-middleName"
+                      value={selectedUser.middleName}
+                      onChange={(e) => setSelectedUser({ ...selectedUser, middleName: e.target.value })}
+                      disabled={isViewMode}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-phoneNumber">Phone Number</Label>
+                    <Input
+                      id="edit-phoneNumber"
+                      value={selectedUser.phoneNumber}
+                      onChange={(e) => setSelectedUser({ ...selectedUser, phoneNumber: e.target.value })}
+                      disabled={isViewMode}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-gender">Gender <span className="text-red-500">*</span></Label>
+                    <select
+                      id="edit-gender"
+                      value={selectedUser.gender}
+                      onChange={(e) => setSelectedUser({ ...selectedUser, gender: e.target.value as any })}
+                      required
+                      disabled={isViewMode}
+                      className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="unspecified">Prefer not to say</option>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-status">Status <span className="text-red-500">*</span></Label>
+                    <select
+                      id="edit-status"
+                      value={selectedUser.status}
+                      onChange={(e) => setSelectedUser({ ...selectedUser, status: e.target.value as AccountStatus })}
+                      required
+                      disabled={isViewMode}
+                      className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Role-Specific Fields */}
+              {selectedUser.role === 'dentist' && (
+                <div className="space-y-4 border-t border-[hsl(258_22%_90%)] pt-4">
+                  <h4 className="text-sm font-semibold uppercase tracking-wide text-[hsl(258_22%_50%)]">
+                    Dentist Information
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="edit-specialization">Specialization</Label>
+                      <Input
+                        id="edit-specialization"
+                        value={selectedUser.specialization}
+                        onChange={(e) => setSelectedUser({ ...selectedUser, specialization: e.target.value })}
+                        disabled={isViewMode}
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="edit-licenseNumber">License Number</Label>
+                      <Input
+                        id="edit-licenseNumber"
+                        value={selectedUser.licenseNumber}
+                        onChange={(e) => setSelectedUser({ ...selectedUser, licenseNumber: e.target.value })}
+                        disabled={isViewMode}
+                        className="mt-1"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {selectedUser.role === 'dental_staff' && (
+                <div className="space-y-4 border-t border-[hsl(258_22%_90%)] pt-4">
+                  <h4 className="text-sm font-semibold uppercase tracking-wide text-[hsl(258_22%_50%)]">
+                    Staff Information
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="edit-designation">Designation</Label>
+                      <Input
+                        id="edit-designation"
+                        value={selectedUser.designation}
+                        onChange={(e) => setSelectedUser({ ...selectedUser, designation: e.target.value })}
+                        disabled={isViewMode}
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="edit-assignedDoctor">Assigned Doctor</Label>
+                      <Input
+                        id="edit-assignedDoctor"
+                        value={selectedUser.assignedDoctor}
+                        onChange={(e) => setSelectedUser({ ...selectedUser, assignedDoctor: e.target.value })}
+                        disabled={isViewMode}
+                        className="mt-1"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {selectedUser.role === 'patient' && (
+                <div className="space-y-4 border-t border-[hsl(258_22%_90%)] pt-4">
+                  <h4 className="text-sm font-semibold uppercase tracking-wide text-[hsl(258_22%_50%)]">
+                    Patient Information
+                  </h4>
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="edit-address">Address <span className="text-red-500">*</span></Label>
+                      <Input
+                        id="edit-address"
+                        value={selectedUser.address}
+                        onChange={(e) => setSelectedUser({ ...selectedUser, address: e.target.value })}
+                        required
+                        disabled={isViewMode}
+                        className="mt-1"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="edit-emergencyContactName">Emergency Contact Name <span className="text-red-500">*</span></Label>
+                        <Input
+                          id="edit-emergencyContactName"
+                          value={selectedUser.emergencyContactName}
+                          onChange={(e) => setSelectedUser({ ...selectedUser, emergencyContactName: e.target.value })}
+                          required
+                          disabled={isViewMode}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="edit-emergencyContactNo">Emergency Contact Number <span className="text-red-500">*</span></Label>
+                        <Input
+                          id="edit-emergencyContactNo"
+                          value={selectedUser.emergencyContactNo}
+                          onChange={(e) => setSelectedUser({ ...selectedUser, emergencyContactNo: e.target.value })}
+                          required
+                          disabled={isViewMode}
+                          className="mt-1"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </form>
+            )}
+
+            {/* Action Buttons at Bottom - Outside Form */}
+            {selectedUser && (
+              <div className="p-6 pt-0">
+                <div className="flex items-center gap-3 pt-4 border-t border-[hsl(258_22%_90%)]">
+                  {isViewMode ? (
+                    <>
+                      <Button
+                        type="button"
+                        onClick={() => setIsViewMode(false)}
+                        className="bg-[hsl(258_46%_25%)] text-white hover:bg-[hsl(258_46%_22%)] cursor-pointer active:scale-95 transition-transform"
+                      >
+                        <Edit2 className="h-4 w-4 mr-2" />
+                        Edit
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setShowEditDialog(false);
+                          setShowDeleteDialog(true);
+                        }}
+                        disabled={selectedUser.user_id === currentUser?.user_id}
+                        className={`border-red-200 text-red-600 hover:bg-red-50 transition-transform ${selectedUser.user_id === currentUser?.user_id ? 'cursor-not-allowed opacity-50' : 'cursor-pointer active:scale-95'}`}
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setIsViewMode(true); // Return to view mode without submitting
+                        }}
+                        disabled={isUpdating}
+                        className="cursor-pointer active:scale-95 transition-transform disabled:cursor-not-allowed"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          // Manually trigger form submission
+                          const form = document.querySelector('form');
+                          if (form) {
+                            form.requestSubmit();
+                          }
+                        }}
+                        disabled={isUpdating}
+                        className="bg-[hsl(258_46%_25%)] text-white hover:bg-[hsl(258_46%_22%)] cursor-pointer active:scale-95 transition-transform disabled:cursor-not-allowed"
+                      >
+                        {isUpdating ? (
+                          <>
+                            <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                            Updating...
+                          </>
+                        ) : (
+                          'Save Changes'
+                        )}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {showDeleteDialog && selectedUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="h-12 w-12 rounded-full bg-red-100 flex items-center justify-center">
+                  <Trash2 className="h-6 w-6 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-[hsl(258_46%_25%)]">Delete User</h3>
+                  <p className="text-sm text-[hsl(258_22%_50%)]">This action cannot be undone</p>
+                </div>
+              </div>
+              
+              <p className="text-[hsl(258_22%_50%)] mb-6">
+                Are you sure you want to delete <strong>{selectedUser.firstName} {selectedUser.lastName}</strong>? 
+                All associated data will be permanently removed from the system.
+              </p>
+
+              <div className="flex justify-end gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowDeleteDialog(false);
+                    setSelectedUser(null);
+                  }}
+                  disabled={isDeleting}
+                  className="cursor-pointer active:scale-95 transition-transform disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleDeleteUser}
+                  disabled={isDeleting}
+                  className="bg-red-600 text-white hover:bg-red-700 cursor-pointer active:scale-95 transition-transform disabled:cursor-not-allowed"
+                >
+                  {isDeleting ? (
+                    <>
+                      <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete User
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

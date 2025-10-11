@@ -1,11 +1,13 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { HelpCircle, Book, MessageCircle, Phone, Mail, ExternalLink, ChevronDown, ChevronUp } from "lucide-react";
+import { HelpCircle, Book, MessageCircle, Phone, Mail, ExternalLink, ChevronDown, ChevronUp, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function HelpPage() {
+  const router = useRouter();
   const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   const faqs = [
@@ -41,6 +43,18 @@ export default function HelpPage() {
 
   return (
     <div className="space-y-6">
+      {/* Breadcrumb Navigation */}
+      <div className="flex items-center gap-2 text-sm">
+        <button
+          onClick={() => router.push('/settings')}
+          className="text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] transition-colors cursor-pointer font-medium"
+        >
+          Settings
+        </button>
+        <ChevronRight className="h-4 w-4 text-[hsl(258_22%_40%)]" />
+        <span className="text-[hsl(258_46%_25%)] font-semibold">Help & Support</span>
+      </div>
+
       {/* Page Title */}
       <div>
         <h2 className="text-2xl font-bold text-[hsl(258_46%_25%)]">Help & Support</h2>
