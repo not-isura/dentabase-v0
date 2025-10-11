@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,9 +17,11 @@ import {
   EyeOff
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 
-type UserRole = "admin" | "doctor" | "dental_staff";
+type UserRole = "admin" | "dentist" | "dental_staff" | "patient";
 type AccountStatus = "active" | "inactive";
+
 
 interface NewAccount {
   firstName: string;
@@ -28,6 +30,7 @@ interface NewAccount {
   email: string;
   tempPassword: string;
   phoneNumber: string;
+  gender: 'male' | 'female' | 'other' | 'unspecified';
   role: UserRole;
   status: AccountStatus;
   specialization: string;
@@ -36,6 +39,9 @@ interface NewAccount {
   scheduleAvailability: string;
   designation: string;
   assignedDoctor: string;
+  address: string;
+  emergencyContactName: string;
+  emergencyContactNo: string;
 }
 
 const INITIAL_ACCOUNT_STATE: NewAccount = {
@@ -43,8 +49,9 @@ const INITIAL_ACCOUNT_STATE: NewAccount = {
   middleName: "",
   lastName: "",
   email: "",
-  tempPassword: "",
+  tempPassword: "dentabase2025",
   phoneNumber: "",
+  gender: "unspecified",
   role: "admin",
   status: "active",
   specialization: "",
@@ -52,13 +59,17 @@ const INITIAL_ACCOUNT_STATE: NewAccount = {
   clinicAssignment: "",
   scheduleAvailability: "",
   designation: "",
-  assignedDoctor: ""
+  assignedDoctor: "",
+  address: "",
+  emergencyContactName: "",
+  emergencyContactNo: ""
 };
 
 const ROLE_LABEL_MAP: Record<UserRole, string> = {
   admin: "Admin",
-  doctor: "Doctor",
-  "dental_staff": "Dental Staff"
+  dentist: "Dentist",
+  "dental_staff": "Dental Staff",
+  patient: "Patient"
 };
 
 interface ExistingUser {
@@ -74,10 +85,11 @@ interface ExistingUser {
 
 export default function AccountManagementPage() {
   const router = useRouter();
+  const { user, isLoading: isLoadingAuth } = useAuth();
+  
   const [activeTab, setActiveTab] = useState<'create' | 'manage'>('create');
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-
+  const [isSaving, setIsSaving] = useState(false);
   const [newAccount, setNewAccount] = useState<NewAccount>(INITIAL_ACCOUNT_STATE);
 
   // Mock data for existing users - in real app, this would come from Supabase
@@ -87,7 +99,7 @@ export default function AccountManagementPage() {
       first_name: 'Dr. Sarah',
       last_name: 'Johnson',
       email: 'sarah.johnson@dentabase.com',
-      role: 'doctor',
+      role: 'dentist',
       status: 'active',
       created_at: '2024-09-01T10:00:00Z'
     },
@@ -102,6 +114,25 @@ export default function AccountManagementPage() {
     }
   ]);
 
+  // Protect route - redirect non-admins
+  useEffect(() => {
+    if (!isLoadingAuth && user && user.role !== 'admin') {
+      router.push('/404');
+    }
+  }, [user, isLoadingAuth, router]);
+
+  // Show loading state while checking auth or if unauthorized
+  if (isLoadingAuth || !user || user.role !== 'admin') {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-[hsl(258_46%_25%)] border-t-transparent mx-auto mb-4" />
+          <p className="text-[hsl(258_22%_50%)]">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   const handleInputChange = (field: keyof NewAccount, value: string) => {
     setNewAccount(prev => ({ ...prev, [field]: value }));
   };
@@ -110,11 +141,14 @@ export default function AccountManagementPage() {
     setNewAccount(prev => ({
       ...prev,
       role,
-      ...(role === "doctor"
-        ? { designation: "", assignedDoctor: "" }
+      ...(role === "dentist"
+        ? { designation: "", assignedDoctor: "", address: "", emergencyContactName: "", emergencyContactNo: "" }
         : {}),
       ...(role === "dental_staff"
-        ? { specialization: "", licenseNumber: "", clinicAssignment: "", scheduleAvailability: "" }
+        ? { specialization: "", licenseNumber: "", clinicAssignment: "", scheduleAvailability: "", address: "", emergencyContactName: "", emergencyContactNo: "" }
+        : {}),
+      ...(role === "patient"
+        ? { specialization: "", licenseNumber: "", clinicAssignment: "", scheduleAvailability: "", designation: "", assignedDoctor: "" }
         : {}),
       ...(role === "admin"
         ? {
@@ -123,44 +157,74 @@ export default function AccountManagementPage() {
             clinicAssignment: "",
             scheduleAvailability: "",
             designation: "",
-            assignedDoctor: ""
+            assignedDoctor: "",
+            address: "",
+            emergencyContactName: "",
+            emergencyContactNo: ""
           }
         : {})
     }));
   };
 
-  const handleGeneratePassword = () => {
-    const generated = Math.random().toString(36).slice(-10);
-    setNewAccount(prev => ({ ...prev, tempPassword: generated }));
-    setShowPassword(false);
-  };
-
   const handleCreateAccount = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setIsLoading(true);
+    setIsSaving(true);
 
     const roleLabel = ROLE_LABEL_MAP[newAccount.role];
-    const role = newAccount.role;
-    const status = newAccount.status;
 
     try {
-      // TODO: Replace with Supabase insert for new user account
-      console.log("Saving account payload:", newAccount);
+      // Call the API to create user
+      const response = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: newAccount.email,
+          tempPassword: newAccount.tempPassword,
+          firstName: newAccount.firstName,
+          middleName: newAccount.middleName,
+          lastName: newAccount.lastName,
+          phoneNumber: newAccount.phoneNumber,
+          gender: newAccount.gender,
+          role: newAccount.role,
+          status: newAccount.status,
+          // Doctor-specific fields
+          specialization: newAccount.specialization,
+          licenseNumber: newAccount.licenseNumber,
+          clinicAssignment: newAccount.clinicAssignment,
+          // Staff-specific fields
+          designation: newAccount.designation,
+          assignedDoctor: newAccount.assignedDoctor,
+          // Patient-specific fields
+          address: newAccount.address,
+          emergencyContactName: newAccount.emergencyContactName,
+          emergencyContactNo: newAccount.emergencyContactNo,
+        }),
+      });
 
-      await new Promise(resolve => setTimeout(resolve, 1200));
+      const data = await response.json();
 
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create account');
+      }
+
+      // Success! Reset form
       setNewAccount({
         ...INITIAL_ACCOUNT_STATE,
-        role,
-        status
+        role: newAccount.role,
+        status: newAccount.status,
       });
-      alert(`${roleLabel} account saved successfully!`);
-    } catch (error) {
-      console.error("Error saving account:", error);
-      alert("Failed to save account. Please try again.");
-    } finally {
-      setIsLoading(false);
+      
+      alert(`${roleLabel} account created successfully!\n\nEmail: ${newAccount.email}\nTemp Password: ${newAccount.tempPassword}\n\nPlease share these credentials with the new user.`);
+      
+      // Clear password after showing it
       setShowPassword(false);
+    } catch (error: any) {
+      console.error("Error creating account:", error);
+      alert(`Failed to create account:\n${error.message}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -175,7 +239,7 @@ export default function AccountManagementPage() {
 
   const getRoleBadgeStyles = (role: string) => {
     switch (role) {
-      case "doctor":
+      case "dentist":
         return "bg-[hsl(258_46%_25%/0.1)] text-[hsl(258_46%_25%)]";
       case "dental_staff":
         return "bg-blue-100 text-blue-800";
@@ -319,20 +383,35 @@ export default function AccountManagementPage() {
                       />
                       <p className="mt-1 text-xs text-gray-500">Optional field – can be updated later.</p>
                     </div>
+                    <div>
+                      <Label htmlFor="gender">Gender *</Label>
+                      <select
+                        id="gender"
+                        value={newAccount.gender}
+                        onChange={(e) => handleInputChange("gender", e.target.value)}
+                        required
+                        className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <option value="unspecified">Prefer not to say</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
                     <div>
                       <Label htmlFor="tempPassword">Temporary Password *</Label>
-                      <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <div className="relative w-full sm:flex-1">
+                      <div className="mt-1">
+                        <div className="relative w-full">
                           <Input
                             id="tempPassword"
                             type={showPassword ? "text" : "password"}
                             value={newAccount.tempPassword}
                             onChange={(e) => handleInputChange("tempPassword", e.target.value)}
                             required
-                            placeholder="Auto-generate or enter custom"
+                            placeholder="dentabase2025"
                             className="pr-10"
                           />
                           <button
@@ -343,16 +422,8 @@ export default function AccountManagementPage() {
                             {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                           </button>
                         </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={handleGeneratePassword}
-                          className="whitespace-nowrap"
-                        >
-                          Generate Password
-                        </Button>
                       </div>
-                      <p className="mt-1 text-xs text-gray-500">Share this with the user for their first login. They can change it afterwards.</p>
+                      <p className="mt-1 text-xs text-gray-500">Default password: dentabase2025. Users should change it after first login.</p>
                     </div>
                     <div className="grid grid-cols-1 gap-4 sm:content-start">
                       <div>
@@ -364,20 +435,9 @@ export default function AccountManagementPage() {
                           className="mt-1 w-full rounded-md border border-[hsl(258_22%_90%)] bg-white px-3 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)]"
                         >
                           <option value="admin">Admin</option>
-                          <option value="doctor">Doctor</option>
+                          <option value="dentist">Dentist</option>
                           <option value="dental_staff">Dental Staff</option>
-                        </select>
-                      </div>
-                      <div>
-                        <Label htmlFor="status">Status *</Label>
-                        <select
-                          id="status"
-                          value={newAccount.status}
-                          onChange={(e) => handleInputChange("status", e.target.value as AccountStatus)}
-                          className="mt-1 w-full rounded-md border border-[hsl(258_22%_90%)] bg-white px-3 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)]"
-                        >
-                          <option value="active">Active</option>
-                          <option value="inactive">Inactive</option>
+                          <option value="patient">Patient</option>
                         </select>
                       </div>
                     </div>
@@ -390,7 +450,7 @@ export default function AccountManagementPage() {
                     <p className="text-xs text-gray-500">Complete the fields that are relevant to the selected role.</p>
                   </div>
 
-                  {newAccount.role === "doctor" && (
+                  {newAccount.role === "dentist" && (
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <div className="md:col-span-2">
                         <Label htmlFor="specialization">Specialization</Label>
@@ -469,6 +529,47 @@ export default function AccountManagementPage() {
                     </div>
                   )}
 
+                  {newAccount.role === "patient" && (
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <div className="md:col-span-2">
+                        <Label htmlFor="address">Address *</Label>
+                        <Input
+                          id="address"
+                          value={newAccount.address}
+                          onChange={(e) => handleInputChange("address", e.target.value)}
+                          placeholder="Street, City, Province"
+                          className="mt-1"
+                          required
+                        />
+                        <p className="mt-1 text-xs text-gray-500">Required for patient records.</p>
+                      </div>
+                      <div>
+                        <Label htmlFor="emergencyContactName">Emergency Contact Name *</Label>
+                        <Input
+                          id="emergencyContactName"
+                          value={newAccount.emergencyContactName}
+                          onChange={(e) => handleInputChange("emergencyContactName", e.target.value)}
+                          placeholder="Full name"
+                          className="mt-1"
+                          required
+                        />
+                        <p className="mt-1 text-xs text-gray-500">Name of emergency contact person.</p>
+                      </div>
+                      <div>
+                        <Label htmlFor="emergencyContactNo">Emergency Contact Number *</Label>
+                        <Input
+                          id="emergencyContactNo"
+                          value={newAccount.emergencyContactNo}
+                          onChange={(e) => handleInputChange("emergencyContactNo", e.target.value)}
+                          placeholder="Phone number"
+                          className="mt-1"
+                          required
+                        />
+                        <p className="mt-1 text-xs text-gray-500">Contact number for emergencies.</p>
+                      </div>
+                    </div>
+                  )}
+
                   {newAccount.role === "admin" && (
                     <div className="rounded-md border border-dashed border-[hsl(258_22%_90%)] bg-[hsl(258_46%_25%/0.02)] p-4 text-sm text-[hsl(258_22%_50%)]">
                       Admin accounts only require the general information above. No extra fields needed.
@@ -479,10 +580,10 @@ export default function AccountManagementPage() {
                 <div className="flex justify-end pt-2">
                   <Button
                     type="submit"
-                    disabled={isLoading}
+                    disabled={isSaving}
                     className="bg-[hsl(258_46%_25%)] px-6 text-white hover:bg-[hsl(258_46%_22%)]"
                   >
-                    {isLoading ? (
+                    {isSaving ? (
                       <>
                         <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                         Saving Account...

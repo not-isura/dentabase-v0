@@ -38,13 +38,16 @@ export interface AuthContextType {
   // User data
   user: UserProfile | null;
   patientProfile: PatientProfile | null;
+  displayUser: UserProfile | null; // User to display in UI (persists during logout)
   
   // Loading states
   isLoading: boolean;
   isAuthenticated: boolean;
+  isLoggingOut: boolean;
   
   // Actions
   refreshUser: () => Promise<void>;
   updateUser: (updates: Partial<UserProfile>) => void;
   updatePatientProfile: (updates: Partial<PatientProfile>) => void;
+  setIsLoggingOut: (value: boolean) => void;
 }

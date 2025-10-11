@@ -24,6 +24,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [patientProfile, setPatientProfile] = useState<PatientProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutUserSnapshot, setLogoutUserSnapshot] = useState<UserProfile | null>(null);
 
   /**
    * Fetch user profile data from database
@@ -39,7 +41,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
       
       if (authError) {
-        console.error("❌ [AuthContext] Auth error:", authError);
+        // Silently handle "Auth session missing" errors (expected when logged out)
+        if (authError.message?.includes("Auth session missing")) {
+          console.log("ℹ️ [AuthContext] No active session (user is logged out)");
+        } else {
+          console.error("❌ [AuthContext] Auth error:", authError);
+        }
         setUser(null);
         setPatientProfile(null);
         setIsLoading(false);
@@ -108,8 +115,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       
       setIsLoading(false);
-    } catch (error) {
-      console.error("❌ [AuthContext] Unexpected error:", error);
+    } catch (error: any) {
+      // Silently handle "Auth session missing" errors (expected when logged out)
+      if (error?.message?.includes("Auth session missing") || error?.name === "AuthSessionMissingError") {
+        console.log("ℹ️ [AuthContext] No active session (user is logged out)");
+      } else {
+        console.error("❌ [AuthContext] Unexpected error:", error);
+      }
       setUser(null);
       setPatientProfile(null);
       setIsLoading(false);
@@ -164,12 +176,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
         console.log("🔄 [AuthContext] Re-fetching user profile due to auth change...");
+        // Clear logout state when signing in with new account
+        setIsLoggingOut(false);
+        setLogoutUserSnapshot(null);
         fetchUserProfile();
       } else if (event === "SIGNED_OUT") {
         console.log("👋 [AuthContext] User signed out, clearing context...");
-        setUser(null);
-        setPatientProfile(null);
-        setIsLoading(false);
+        // Only clear if not in the middle of a manual logout (to prevent UI flash)
+        if (!isLoggingOut) {
+          setUser(null);
+          setPatientProfile(null);
+          setIsLoading(false);
+        }
       }
     });
     
@@ -177,16 +195,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log("🛑 [AuthContext] Unsubscribing from auth state changes...");
       subscription.unsubscribe();
     };
-  }, [fetchUserProfile]);
+  }, [fetchUserProfile, isLoggingOut]);
 
   const value: AuthContextType = {
     user,
     patientProfile,
+    displayUser: isLoggingOut ? logoutUserSnapshot : user, // Use snapshot during logout
     isLoading,
     isAuthenticated: !!user,
+    isLoggingOut,
     refreshUser,
     updateUser,
     updatePatientProfile,
+    setIsLoggingOut: (value: boolean) => {
+      if (value && user) {
+        // Take a snapshot of current user before logout
+        setLogoutUserSnapshot(user);
+      } else if (!value) {
+        // Clear snapshot when not logging out
+        setLogoutUserSnapshot(null);
+      }
+      setIsLoggingOut(value);
+    },
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

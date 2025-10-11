@@ -36,12 +36,13 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   
   // 🎯 Get real user data from Auth Context
-  const { user, isLoading: isLoadingUser } = useAuth();
+  const { displayUser, isLoading: isLoadingUser, setIsLoggingOut: setAuthLoggingOut } = useAuth();
 
   const handleLogout = async () => {
     if (isLoggingOut) return; // Prevent double-click
     
     setIsLoggingOut(true);
+    setAuthLoggingOut(true); // Prevent Auth Context from clearing user data
     
     try {
       const supabase = createClient();
@@ -143,20 +144,20 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               userName={
                 isLoadingUser 
                   ? "Loading..." 
-                  : user 
-                    ? `${user.first_name} ${user.last_name}` 
+                  : displayUser
+                    ? `${displayUser.role === 'dentist' ? 'Dr. ' : ''}${displayUser.first_name} ${displayUser.last_name}` 
                     : "Guest User"
               }
               userEmail={
                 isLoadingUser 
                   ? "Loading..." 
-                  : user?.email || "Not logged in"
+                  : displayUser?.email || "Not logged in"
               }
               userRole={
                 isLoadingUser 
                   ? "Loading..." 
-                  : user 
-                    ? user.role.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase()) 
+                  : displayUser 
+                    ? displayUser.role.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase()) 
                     : "Guest"
               }
               onSettingsClick={() => {

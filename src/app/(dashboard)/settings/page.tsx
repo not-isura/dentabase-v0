@@ -16,6 +16,7 @@ import {
   HelpCircle 
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 
 interface SettingsCategory {
   icon: any;
@@ -28,6 +29,10 @@ interface SettingsCategory {
 
 export default function SettingsPage() {
   const router = useRouter();
+  const { user, isLoading } = useAuth();
+  
+  // Check if user is admin
+  const isAdmin = user?.role === "admin";
   
   // System management settings categories
   const systemSettings: SettingsCategory[] = [
@@ -122,68 +127,70 @@ export default function SettingsPage() {
       {/* Settings Categories Grid */}
       <div className="space-y-8">
         
-        {/* SYSTEM MANAGEMENT SECTION */}
-        <div>
-          <div className="mb-4">
-            <h3 className="text-lg font-semibold text-[hsl(258_46%_25%)] flex items-center gap-2">
-              <Shield className="h-5 w-5" />
-              Administrator Settings
-            </h3>
-            <p className="text-sm text-[hsl(258_22%_50%)]">
-              System management and administrative controls
-            </p>
-          </div>
+        {/* SYSTEM MANAGEMENT SECTION - Only visible to admins */}
+        {isAdmin && (
+          <div>
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-[hsl(258_46%_25%)] flex items-center gap-2">
+                <Shield className="h-5 w-5" />
+                Administrator Settings
+              </h3>
+              <p className="text-sm text-[hsl(258_22%_50%)]">
+                System management and administrative controls
+              </p>
+            </div>
 
-          {/* Administrator Access Badge */}
-          <div className="bg-gradient-to-r from-[hsl(258_46%_25%)] to-[hsl(258_46%_30%)] text-white px-4 py-2 rounded-lg mb-6">
-            <div className="flex items-center space-x-2">
-              <Shield className="h-4 w-4" />
-              <span className="text-sm font-medium">Administrator Access</span>
+            {/* Administrator Access Badge */}
+            <div className="bg-gradient-to-r from-[hsl(258_46%_25%)] to-[hsl(258_46%_30%)] text-white px-4 py-2 rounded-lg mb-6">
+              <div className="flex items-center space-x-2">
+                <Shield className="h-4 w-4" />
+                <span className="text-sm font-medium">Administrator Access</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              {systemSettings.map((category, index) => (
+                <Card 
+                  key={`admin-${index}`} 
+                  className="bg-white hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-[hsl(258_46%_25%)] hover:border-l-[hsl(258_46%_20%)]"
+                  onClick={() => handleCardClick(category.route)}
+                >
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className="h-12 w-12 rounded-xl flex items-center justify-center bg-[hsl(258_46%_25%)] text-white">
+                          <category.icon className="h-6 w-6" />
+                        </div>
+                        <div className="flex-1">
+                          <CardTitle className="text-[hsl(258_46%_25%)] text-lg">{category.title}</CardTitle>
+                          <CardDescription className="text-[hsl(258_22%_50%)] text-sm mt-1">
+                            {category.description}
+                          </CardDescription>
+                        </div>
+                      </div>
+                      <ChevronRight className="h-5 w-5 text-[hsl(258_22%_50%)] opacity-50" />
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <div className="space-y-2">
+                      {category.items.slice(0, 3).map((item, itemIndex) => (
+                        <div key={itemIndex} className="flex items-center text-sm text-[hsl(258_22%_50%)]">
+                          <div className="h-1.5 w-1.5 rounded-full bg-[hsl(258_46%_25%)] mr-2 opacity-60"></div>
+                          <span>{item}</span>
+                        </div>
+                      ))}
+                      {category.items.length > 3 && (
+                        <div className="text-xs text-[hsl(258_22%_50%)] mt-2">
+                          +{category.items.length - 3} more options
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {systemSettings.map((category, index) => (
-              <Card 
-                key={`admin-${index}`} 
-                className="bg-white hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-[hsl(258_46%_25%)] hover:border-l-[hsl(258_46%_20%)]"
-                onClick={() => handleCardClick(category.route)}
-              >
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="h-12 w-12 rounded-xl flex items-center justify-center bg-[hsl(258_46%_25%)] text-white">
-                        <category.icon className="h-6 w-6" />
-                      </div>
-                      <div className="flex-1">
-                        <CardTitle className="text-[hsl(258_46%_25%)] text-lg">{category.title}</CardTitle>
-                        <CardDescription className="text-[hsl(258_22%_50%)] text-sm mt-1">
-                          {category.description}
-                        </CardDescription>
-                      </div>
-                    </div>
-                    <ChevronRight className="h-5 w-5 text-[hsl(258_22%_50%)] opacity-50" />
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="space-y-2">
-                    {category.items.slice(0, 3).map((item, itemIndex) => (
-                      <div key={itemIndex} className="flex items-center text-sm text-[hsl(258_22%_50%)]">
-                        <div className="h-1.5 w-1.5 rounded-full bg-[hsl(258_46%_25%)] mr-2 opacity-60"></div>
-                        <span>{item}</span>
-                      </div>
-                    ))}
-                    {category.items.length > 3 && (
-                      <div className="text-xs text-[hsl(258_22%_50%)] mt-2">
-                        +{category.items.length - 3} more options
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
+        )}
 
         {/* PERSONAL SECTION */}
         <div>

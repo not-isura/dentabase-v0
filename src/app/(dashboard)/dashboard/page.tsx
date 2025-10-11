@@ -8,7 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 
 export default function DashboardPage() {
   // 🎯 Get real user data from Auth Context
-  const { user, isLoading: isLoadingUser } = useAuth();
+  const { displayUser, isLoading: isLoadingUser } = useAuth();
 
   const stats = [
     {
@@ -63,10 +63,10 @@ export default function DashboardPage() {
             <h1 className="text-3xl font-bold flex items-center">
               {isLoadingUser ? (
                 "Loading..."
-              ) : user ? (
+              ) : displayUser ? (
                 <>
                   <Sparkles className="h-8 w-8 mr-3" />
-                  Welcome back, {user.first_name}!
+                  Welcome back, {displayUser.role === 'dentist' ? 'Dr. ' : ''}{displayUser.first_name}!
                 </>
               ) : (
                 "Welcome to Dentabase"
