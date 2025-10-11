@@ -14,13 +14,25 @@ import {
   Search,
   MoreVertical,
   Eye,
-  EyeOff
+  EyeOff,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  X
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 
 type UserRole = "admin" | "dentist" | "dental_staff" | "patient";
 type AccountStatus = "active" | "inactive";
+
+interface Notification {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  title: string;
+  message: string;
+  details?: string[];
+}
 
 
 interface NewAccount {
@@ -33,6 +45,7 @@ interface NewAccount {
   gender: 'male' | 'female' | 'other' | 'unspecified';
   role: UserRole;
   status: AccountStatus;
+  emailVerified: boolean;
   specialization: string;
   licenseNumber: string;
   clinicAssignment: string;
@@ -54,6 +67,7 @@ const INITIAL_ACCOUNT_STATE: NewAccount = {
   gender: "unspecified",
   role: "admin",
   status: "active",
+  emailVerified: true,
   specialization: "",
   licenseNumber: "",
   clinicAssignment: "",
@@ -91,6 +105,7 @@ export default function AccountManagementPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [newAccount, setNewAccount] = useState<NewAccount>(INITIAL_ACCOUNT_STATE);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
   // Mock data for existing users - in real app, this would come from Supabase
   const [existingUsers] = useState<ExistingUser[]>([
@@ -133,8 +148,26 @@ export default function AccountManagementPage() {
     );
   }
 
+  // Notification helpers
+  const showNotification = (type: 'success' | 'error' | 'info', title: string, message: string, details?: string[]) => {
+    const id = Date.now().toString();
+    setNotifications(prev => [...prev, { id, type, title, message, details }]);
+    
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 5000);
+  };
+
+  const dismissNotification = (id: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  };
+
   const handleInputChange = (field: keyof NewAccount, value: string) => {
-    setNewAccount(prev => ({ ...prev, [field]: value }));
+    setNewAccount(prev => ({ 
+      ...prev, 
+      [field]: field === 'emailVerified' ? value === 'true' : value 
+    }));
   };
 
   const handleRoleChange = (role: UserRole) => {
@@ -189,6 +222,7 @@ export default function AccountManagementPage() {
           gender: newAccount.gender,
           role: newAccount.role,
           status: newAccount.status,
+          emailVerified: newAccount.emailVerified,
           // Doctor-specific fields
           specialization: newAccount.specialization,
           licenseNumber: newAccount.licenseNumber,
@@ -209,20 +243,33 @@ export default function AccountManagementPage() {
         throw new Error(data.error || 'Failed to create account');
       }
 
-      // Success! Reset form
+      // Success! Show notification
+      showNotification(
+        'success',
+        'Account Created Successfully',
+        `${newAccount.firstName} ${newAccount.lastName} has been added to the system.`,
+        [
+          `Email: ${newAccount.email}`
+        ]
+      );
+
+      // Reset form
       setNewAccount({
         ...INITIAL_ACCOUNT_STATE,
         role: newAccount.role,
         status: newAccount.status,
       });
       
-      alert(`${roleLabel} account created successfully!\n\nEmail: ${newAccount.email}\nTemp Password: ${newAccount.tempPassword}\n\nPlease share these credentials with the new user.`);
-      
       // Clear password after showing it
       setShowPassword(false);
     } catch (error: any) {
       console.error("Error creating account:", error);
-      alert(`Failed to create account:\n${error.message}`);
+      showNotification(
+        'error',
+        'Failed to Create Account',
+        error.message || 'An unexpected error occurred while creating the account.',
+        ['Please check the form and try again.']
+      );
     } finally {
       setIsSaving(false);
     }
@@ -252,6 +299,90 @@ export default function AccountManagementPage() {
 
   return (
     <div className="space-y-6">
+      {/* Notification Stack - Fixed Position */}
+      <div className="fixed bottom-4 right-4 z-50 space-y-3 max-w-md">
+        {notifications.map((notification) => (
+          <div
+            key={notification.id}
+            className={`rounded-lg border shadow-lg p-4 animate-in slide-in-from-right-5 ${
+              notification.type === 'success'
+                ? 'bg-green-50 border-green-200'
+                : notification.type === 'error'
+                ? 'bg-red-50 border-red-200'
+                : 'bg-blue-50 border-blue-200'
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 mt-0.5">
+                {notification.type === 'success' && (
+                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                )}
+                {notification.type === 'error' && (
+                  <XCircle className="h-5 w-5 text-red-600" />
+                )}
+                {notification.type === 'info' && (
+                  <AlertCircle className="h-5 w-5 text-blue-600" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p
+                  className={`text-sm font-semibold ${
+                    notification.type === 'success'
+                      ? 'text-green-900'
+                      : notification.type === 'error'
+                      ? 'text-red-900'
+                      : 'text-blue-900'
+                  }`}
+                >
+                  {notification.title}
+                </p>
+                <p
+                  className={`mt-1 text-sm ${
+                    notification.type === 'success'
+                      ? 'text-green-700'
+                      : notification.type === 'error'
+                      ? 'text-red-700'
+                      : 'text-blue-700'
+                  }`}
+                >
+                  {notification.message}
+                </p>
+                {notification.details && notification.details.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {notification.details.map((detail, index) => (
+                      <p
+                        key={index}
+                        className={`text-xs font-medium ${
+                          notification.type === 'success'
+                            ? 'text-green-800'
+                            : notification.type === 'error'
+                            ? 'text-red-800'
+                            : 'text-blue-800'
+                        }`}
+                      >
+                        {detail}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => dismissNotification(notification.id)}
+                className={`flex-shrink-0 rounded-md p-1 hover:bg-white/50 transition-colors ${
+                  notification.type === 'success'
+                    ? 'text-green-600'
+                    : notification.type === 'error'
+                    ? 'text-red-600'
+                    : 'text-blue-600'
+                }`}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* Header with Back Button */}
       <div className="flex items-center space-x-4">
         <Button 
@@ -325,7 +456,7 @@ export default function AccountManagementPage() {
                   </div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                     <div>
-                      <Label htmlFor="firstName">First Name *</Label>
+                      <Label htmlFor="firstName">First Name <span className="text-red-500">*</span></Label>
                       <Input
                         id="firstName"
                         value={newAccount.firstName}
@@ -347,7 +478,7 @@ export default function AccountManagementPage() {
                       <p className="mt-1 text-xs text-gray-500">Optional field – can be updated later.</p>
                     </div>
                     <div>
-                      <Label htmlFor="lastName">Last Name *</Label>
+                      <Label htmlFor="lastName">Last Name <span className="text-red-500">*</span></Label>
                       <Input
                         id="lastName"
                         value={newAccount.lastName}
@@ -361,7 +492,7 @@ export default function AccountManagementPage() {
 
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div>
-                      <Label htmlFor="email">Email Address *</Label>
+                      <Label htmlFor="email">Email Address <span className="text-red-500">*</span></Label>
                       <Input
                         id="email"
                         type="email"
@@ -384,7 +515,7 @@ export default function AccountManagementPage() {
                       <p className="mt-1 text-xs text-gray-500">Optional field – can be updated later.</p>
                     </div>
                     <div>
-                      <Label htmlFor="gender">Gender *</Label>
+                      <Label htmlFor="gender">Gender <span className="text-red-500">*</span></Label>
                       <select
                         id="gender"
                         value={newAccount.gender}
@@ -400,19 +531,19 @@ export default function AccountManagementPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_1fr_1fr]">
                     <div>
-                      <Label htmlFor="tempPassword">Temporary Password *</Label>
+                      <Label htmlFor="tempPassword">Temporary Password <span className="text-red-500">*</span></Label>
                       <div className="mt-1">
                         <div className="relative w-full">
                           <Input
                             id="tempPassword"
                             type={showPassword ? "text" : "password"}
                             value={newAccount.tempPassword}
-                            onChange={(e) => handleInputChange("tempPassword", e.target.value)}
+                            readOnly
                             required
                             placeholder="dentabase2025"
-                            className="pr-10"
+                            className="pr-10 bg-gray-50"
                           />
                           <button
                             type="button"
@@ -423,23 +554,47 @@ export default function AccountManagementPage() {
                           </button>
                         </div>
                       </div>
-                      <p className="mt-1 text-xs text-gray-500">Default password: dentabase2025. Users should change it after first login.</p>
+                      <p className="mt-1 text-xs text-gray-500">Users should change it after first login.</p>
                     </div>
-                    <div className="grid grid-cols-1 gap-4 sm:content-start">
-                      <div>
-                        <Label htmlFor="role">Role *</Label>
-                        <select
-                          id="role"
-                          value={newAccount.role}
-                          onChange={(e) => handleRoleChange(e.target.value as UserRole)}
-                          className="mt-1 w-full rounded-md border border-[hsl(258_22%_90%)] bg-white px-3 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)]"
+                    <div>
+                      <Label htmlFor="role">Role <span className="text-red-500">*</span></Label>
+                      <select
+                        id="role"
+                        value={newAccount.role}
+                        onChange={(e) => handleRoleChange(e.target.value as UserRole)}
+                        className="mt-1 h-10 w-full rounded-md border border-[hsl(258_22%_90%)] bg-white px-3 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)]"
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="dentist">Dentist</option>
+                        <option value="dental_staff">Dental Staff</option>
+                        <option value="patient">Patient</option>
+                      </select>
+                    </div>
+                    <div>
+                      <Label htmlFor="emailVerified">Email Verification</Label>
+                      <div className="mt-2 flex items-center space-x-3">
+                        <button
+                          type="button"
+                          onClick={() => handleInputChange("emailVerified", String(!newAccount.emailVerified))}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%)] focus:ring-offset-2 ${
+                            newAccount.emailVerified ? 'bg-[hsl(258_46%_25%)]' : 'bg-gray-300'
+                          }`}
                         >
-                          <option value="admin">Admin</option>
-                          <option value="dentist">Dentist</option>
-                          <option value="dental_staff">Dental Staff</option>
-                          <option value="patient">Patient</option>
-                        </select>
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                              newAccount.emailVerified ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                        <span className="text-sm text-[hsl(258_22%_50%)]">
+                          {newAccount.emailVerified ? 'Auto-verify' : 'Send email'}
+                        </span>
                       </div>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {newAccount.emailVerified 
+                          ? 'User can log in immediately.' 
+                          : 'User must verify email first.'}
+                      </p>
                     </div>
                   </div>
                 </section>
@@ -532,7 +687,7 @@ export default function AccountManagementPage() {
                   {newAccount.role === "patient" && (
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <div className="md:col-span-2">
-                        <Label htmlFor="address">Address *</Label>
+                        <Label htmlFor="address">Address <span className="text-red-500">*</span></Label>
                         <Input
                           id="address"
                           value={newAccount.address}
@@ -544,7 +699,7 @@ export default function AccountManagementPage() {
                         <p className="mt-1 text-xs text-gray-500">Required for patient records.</p>
                       </div>
                       <div>
-                        <Label htmlFor="emergencyContactName">Emergency Contact Name *</Label>
+                        <Label htmlFor="emergencyContactName">Emergency Contact Name <span className="text-red-500">*</span></Label>
                         <Input
                           id="emergencyContactName"
                           value={newAccount.emergencyContactName}
@@ -556,7 +711,7 @@ export default function AccountManagementPage() {
                         <p className="mt-1 text-xs text-gray-500">Name of emergency contact person.</p>
                       </div>
                       <div>
-                        <Label htmlFor="emergencyContactNo">Emergency Contact Number *</Label>
+                        <Label htmlFor="emergencyContactNo">Emergency Contact Number <span className="text-red-500">*</span></Label>
                         <Input
                           id="emergencyContactNo"
                           value={newAccount.emergencyContactNo}

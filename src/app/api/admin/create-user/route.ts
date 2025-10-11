@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       gender,
       role,
       status,
+      emailVerified = true, // Default to true if not provided
       // Doctor-specific
       specialization,
       licenseNumber,
@@ -119,7 +120,7 @@ export async function POST(request: NextRequest) {
     } = await supabaseAdmin.auth.admin.createUser({
       email,
       password: tempPassword,
-      email_confirm: true, // Auto-confirm email
+      email_confirm: emailVerified, // Use the toggle value
       user_metadata: {
         first_name: firstName,
         last_name: lastName,
