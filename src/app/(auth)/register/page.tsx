@@ -33,6 +33,9 @@ export default function RegisterPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState(1); // 1: Personal Info, 2: Contact & Emergency
+  const [emailError, setEmailError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [emergencyPhoneError, setEmergencyPhoneError] = useState('');
 
   // Password validation
   const passwordsMatch = password === confirmPassword && confirmPassword !== "";
@@ -42,6 +45,46 @@ export default function RegisterPage() {
   const hasNumber = /[0-9]/.test(password);
   const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':\\"|<>?,./`~]/.test(password);
   const passwordMeetsAllRequirements = passwordStrength && hasLowercase && hasUppercase && hasNumber && hasSpecial;
+
+  // Helper functions for validation
+  const capitalizeNames = (name: string): string => {
+    return name.split(/(\s+|-)/)
+      .map((part) => part === ' ' || part === '-' ? part : 
+        part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+      .join('');
+  };
+
+  const isValidName = (name: string): boolean => {
+    return /^[a-zA-Z\s\-']*$/.test(name);
+  };
+
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+    if (!emailRegex.test(email)) return false;
+    const parts = email.split('@');
+    if (parts.length !== 2) return false;
+    const domain = parts[1];
+    const domainParts = domain.split('.');
+    if (domainParts[0].length < 2) return false;
+    return true;
+  };
+
+  const formatPhoneNumber = (phone: string): string => {
+    const cleaned = phone.replace(/\D/g, '');
+    if (cleaned.length === 0) return '';
+    if (cleaned.length <= 4) return cleaned;
+    if (cleaned.length <= 7) return `${cleaned.slice(0, 4)} ${cleaned.slice(4)}`;
+    return `${cleaned.slice(0, 4)} ${cleaned.slice(4, 7)} ${cleaned.slice(7, 11)}`;
+  };
+
+  const cleanPhoneNumber = (phone: string): string => {
+    return phone.replace(/\D/g, '');
+  };
+
+  const validatePhoneNumber = (phone: string): boolean => {
+    const cleaned = cleanPhoneNumber(phone);
+    return cleaned.length === 11 && cleaned.startsWith('09');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -196,10 +239,24 @@ export default function RegisterPage() {
                       type="email"
                       placeholder="your.email@example.com"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        if (e.target.value && !validateEmail(e.target.value)) {
+                          setEmailError('Please enter a valid email address (e.g., name@domain.com)');
+                        } else {
+                          setEmailError('');
+                        }
+                      }}
                       required
                       disabled={isLoading}
+                      className={emailError ? 'border-red-500 focus:ring-red-500' : ''}
                     />
+                    {emailError && (
+                      <p className="text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />
+                        {emailError}
+                      </p>
+                    )}
                   </div>
 
                   {/* Name Fields - Grid */}
@@ -211,9 +268,13 @@ export default function RegisterPage() {
                       <Input
                         id="firstName"
                         type="text"
-                        placeholder="John"
+                        placeholder="Juan"
                         value={firstName}
-                        onChange={(e) => setFirstName(e.target.value)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value && !isValidName(value)) return;
+                          setFirstName(capitalizeNames(value));
+                        }}
                         required
                         disabled={isLoading}
                       />
@@ -225,9 +286,13 @@ export default function RegisterPage() {
                       <Input
                         id="middleName"
                         type="text"
-                        placeholder="Optional"
+                        placeholder="Santos"
                         value={middleName}
-                        onChange={(e) => setMiddleName(e.target.value)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value && !isValidName(value)) return;
+                          setMiddleName(capitalizeNames(value));
+                        }}
                         disabled={isLoading}
                       />
                     </div>
@@ -238,9 +303,13 @@ export default function RegisterPage() {
                       <Input
                         id="lastName"
                         type="text"
-                        placeholder="Doe"
+                        placeholder="Dela Cruz"
                         value={lastName}
-                        onChange={(e) => setLastName(e.target.value)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value && !isValidName(value)) return;
+                          setLastName(capitalizeNames(value));
+                        }}
                         required
                         disabled={isLoading}
                       />
@@ -256,7 +325,7 @@ export default function RegisterPage() {
                       id="gender"
                       value={gender}
                       onChange={(e) => setGender(e.target.value as any)}
-                      className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer"
                       disabled={isLoading}
                     >
                       <option value="unspecified">Prefer not to say</option>
@@ -285,7 +354,7 @@ export default function RegisterPage() {
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent cursor-pointer"
                         onClick={() => setShowPassword(!showPassword)}
                         disabled={isLoading}
                       >
@@ -339,7 +408,7 @@ export default function RegisterPage() {
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent cursor-pointer"
                         onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                         disabled={isLoading}
                       >
@@ -361,19 +430,34 @@ export default function RegisterPage() {
                   {/* Phone Number */}
                   <div className="space-y-2">
                     <Label htmlFor="phone" className="text-[hsl(258_46%_25%)]">
-                      Phone Number
+                      Phone Number <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       id="phone"
                       type="tel"
-                      placeholder="+63XXXXXXXXXX or 09XXXXXXXXX"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="09XX XXX XXXX"
+                      value={formatPhoneNumber(phone)}
+                      onChange={(e) => {
+                        const cleaned = cleanPhoneNumber(e.target.value);
+                        if (cleaned.length > 11) return;
+                        setPhone(cleaned);
+                        if (cleaned.length > 0 && !validatePhoneNumber(cleaned)) {
+                          if (cleaned.length < 11) setPhoneError('Phone number must be 11 digits');
+                          else if (!cleaned.startsWith('09')) setPhoneError('Phone number must start with 09');
+                        } else {
+                          setPhoneError('');
+                        }
+                      }}
+                      required
                       disabled={isLoading}
+                      className={phoneError ? 'border-red-500 focus:ring-red-500' : ''}
                     />
-                    <p className="text-xs text-[hsl(258_22%_50%)]">
-                      Format: +63XXXXXXXXXX (will be auto-normalized)
-                    </p>
+                    {phoneError && (
+                      <p className="text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />
+                        {phoneError}
+                      </p>
+                    )}
                   </div>
 
                   {/* Address */}
@@ -389,7 +473,7 @@ export default function RegisterPage() {
                       required
                       disabled={isLoading}
                       rows={3}
-                      className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                      className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none cursor-text"
                     />
                   </div>
 
@@ -409,7 +493,11 @@ export default function RegisterPage() {
                         type="text"
                         placeholder="Full name of emergency contact"
                         value={emergencyContactName}
-                        onChange={(e) => setEmergencyContactName(e.target.value)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value && !isValidName(value)) return;
+                          setEmergencyContactName(capitalizeNames(value));
+                        }}
                         required
                         disabled={isLoading}
                       />
@@ -422,12 +510,29 @@ export default function RegisterPage() {
                       <Input
                         id="emergencyContactNo"
                         type="tel"
-                        placeholder="+63XXXXXXXXXX or 09XXXXXXXXX"
-                        value={emergencyContactNo}
-                        onChange={(e) => setEmergencyContactNo(e.target.value)}
+                        placeholder="09XX XXX XXXX"
+                        value={formatPhoneNumber(emergencyContactNo)}
+                        onChange={(e) => {
+                          const cleaned = cleanPhoneNumber(e.target.value);
+                          if (cleaned.length > 11) return;
+                          setEmergencyContactNo(cleaned);
+                          if (cleaned.length > 0 && !validatePhoneNumber(cleaned)) {
+                            if (cleaned.length < 11) setEmergencyPhoneError('Phone number must be 11 digits');
+                            else if (!cleaned.startsWith('09')) setEmergencyPhoneError('Phone number must start with 09');
+                          } else {
+                            setEmergencyPhoneError('');
+                          }
+                        }}
                         required
                         disabled={isLoading}
+                        className={emergencyPhoneError ? 'border-red-500 focus:ring-red-500' : ''}
                       />
+                      {emergencyPhoneError && (
+                        <p className="text-xs text-red-600 flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" />
+                          {emergencyPhoneError}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -441,7 +546,7 @@ export default function RegisterPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    className="flex-1"
+                    className="flex-1 cursor-pointer"
                     onClick={(e) => {
                       e.preventDefault(); // Explicitly prevent form submission
                       e.stopPropagation(); // Stop event bubbling
@@ -456,7 +561,7 @@ export default function RegisterPage() {
                 {currentStep === 1 ? (
                   <Button
                     type="button"
-                    className="flex-1 bg-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.9)] text-white"
+                    className="flex-1 bg-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.9)] text-white cursor-pointer"
                     onClick={(e) => {
                       e.preventDefault(); // Explicitly prevent form submission
                       e.stopPropagation(); // Stop event bubbling
@@ -466,6 +571,13 @@ export default function RegisterPage() {
                         setError("Please fill in all required fields");
                         return;
                       }
+                      
+                      // Validate email
+                      if (!validateEmail(email)) {
+                        setError("Please enter a valid email address");
+                        return;
+                      }
+                      
                       if (!passwordsMatch) {
                         setError("Passwords do not match");
                         return;
@@ -491,13 +603,13 @@ export default function RegisterPage() {
                     }}
                     disabled={isLoading}
                   >
-                    Next: Contact Details
+                    Next
                   </Button>
                 ) : (
                   <Button
                     type="submit"
-                    className="flex-1 bg-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.9)] text-white"
-                    disabled={isLoading || !address || !emergencyContactName || !emergencyContactNo}
+                    className="flex-1 bg-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.9)] text-white cursor-pointer"
+                    disabled={isLoading || !phone || !address || !emergencyContactName || !emergencyContactNo || phoneError !== '' || emergencyPhoneError !== ''}
                   >
                     {isLoading ? "Creating Account..." : "Create Account"}
                   </Button>
@@ -507,7 +619,7 @@ export default function RegisterPage() {
               {/* Login Link */}
               <div className="text-center text-sm">
                 <span className="text-gray-500">Already have an account?</span>{" "}
-                <Link href="/login" className="text-[hsl(258_46%_25%)] hover:underline font-medium">
+                <Link href="/login" className="text-[hsl(258_46%_25%)] hover:underline font-medium cursor-pointer">
                   Sign in here
                 </Link>
               </div>
@@ -518,11 +630,11 @@ export default function RegisterPage() {
         {/* Privacy Notice */}
         <div className="mt-6 text-center text-xs text-[hsl(258_22%_50%)]">
           By creating an account, you agree to our{" "}
-          <Link href="/privacy" className="underline hover:text-[hsl(258_46%_25%)]">
+          <Link href="/privacy" className="underline hover:text-[hsl(258_46%_25%)] cursor-pointer">
             Privacy Policy
           </Link>{" "}
           and{" "}
-          <Link href="/terms" className="underline hover:text-[hsl(258_46%_25%)]">
+          <Link href="/terms" className="underline hover:text-[hsl(258_46%_25%)] cursor-pointer">
             Terms of Service
           </Link>
         </div>

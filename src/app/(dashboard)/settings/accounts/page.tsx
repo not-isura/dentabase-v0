@@ -190,6 +190,10 @@ export default function AccountManagementPage() {
   const [emailError, setEmailError] = useState('');
   const [phoneError, setPhoneError] = useState('');
   const [emergencyPhoneError, setEmergencyPhoneError] = useState('');
+  
+  // Edit dialog validation states
+  const [editPhoneError, setEditPhoneError] = useState('');
+  const [editEmergencyPhoneError, setEditEmergencyPhoneError] = useState('');
 
   // Manage Users Tab State
   const [existingUsers, setExistingUsers] = useState<ExistingUser[]>([]);
@@ -351,6 +355,34 @@ export default function AccountManagementPage() {
     e.preventDefault();
     if (!selectedUser) return;
 
+    // Validate phone number
+    if (selectedUser.phoneNumber && !validatePhoneNumber(selectedUser.phoneNumber)) {
+      showNotification('error', 'Invalid Phone Number', 'Phone number must be 11 digits starting with 09.');
+      return;
+    }
+
+    // Validate role-specific required fields
+    if (selectedUser.role === 'dentist') {
+      if (!selectedUser.specialization || !selectedUser.licenseNumber) {
+        showNotification('error', 'Missing Required Fields', 'Please fill in Specialization and License Number for dentist.');
+        return;
+      }
+    }
+
+    if (selectedUser.role === 'dental_staff') {
+      if (!selectedUser.designation || !selectedUser.assignedDoctor) {
+        showNotification('error', 'Missing Required Fields', 'Please fill in Position and Assigned Doctor for staff.');
+        return;
+      }
+    }
+
+    if (selectedUser.role === 'patient') {
+      if (!selectedUser.emergencyContactNo || !validatePhoneNumber(selectedUser.emergencyContactNo)) {
+        showNotification('error', 'Invalid Emergency Contact Number', 'Emergency contact number must be 11 digits starting with 09.');
+        return;
+      }
+    }
+
     setIsUpdating(true);
     try {
       const response = await fetch(`/api/admin/users/${selectedUser.user_id}`, {
@@ -370,6 +402,8 @@ export default function AccountManagementPage() {
         setShowEditDialog(false);
         setSelectedUser(null);
         setIsViewMode(true); // Reset view mode
+        setEditPhoneError(''); // Clear error states
+        setEditEmergencyPhoneError('');
         fetchUsers(); // Refresh the list
       } else {
         showNotification('error', 'Failed to Update User', data.error || 'Could not update user');
@@ -1607,6 +1641,8 @@ export default function AccountManagementPage() {
                     setShowEditDialog(false);
                     setSelectedUser(null);
                     setIsViewMode(true);
+                    setEditPhoneError('');
+                    setEditEmergencyPhoneError('');
                   }}
                   className="text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] cursor-pointer active:scale-90 transition-all"
                 >
@@ -1654,7 +1690,11 @@ export default function AccountManagementPage() {
                     <Input
                       id="edit-firstName"
                       value={selectedUser.firstName}
-                      onChange={(e) => setSelectedUser({ ...selectedUser, firstName: e.target.value })}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value && !isValidName(value)) return;
+                        setSelectedUser({ ...selectedUser, firstName: capitalizeNames(value) });
+                      }}
                       required
                       disabled={isViewMode}
                       className="mt-1"
@@ -1665,7 +1705,11 @@ export default function AccountManagementPage() {
                     <Input
                       id="edit-lastName"
                       value={selectedUser.lastName}
-                      onChange={(e) => setSelectedUser({ ...selectedUser, lastName: e.target.value })}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value && !isValidName(value)) return;
+                        setSelectedUser({ ...selectedUser, lastName: capitalizeNames(value) });
+                      }}
                       required
                       disabled={isViewMode}
                       className="mt-1"
@@ -1676,20 +1720,42 @@ export default function AccountManagementPage() {
                     <Input
                       id="edit-middleName"
                       value={selectedUser.middleName}
-                      onChange={(e) => setSelectedUser({ ...selectedUser, middleName: e.target.value })}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value && !isValidName(value)) return;
+                        setSelectedUser({ ...selectedUser, middleName: capitalizeNames(value) });
+                      }}
                       disabled={isViewMode}
                       className="mt-1"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="edit-phoneNumber">Phone Number</Label>
+                    <Label htmlFor="edit-phoneNumber">Phone Number <span className="text-red-500">*</span></Label>
                     <Input
                       id="edit-phoneNumber"
-                      value={selectedUser.phoneNumber}
-                      onChange={(e) => setSelectedUser({ ...selectedUser, phoneNumber: e.target.value })}
+                      value={formatPhoneNumber(selectedUser.phoneNumber)}
+                      onChange={(e) => {
+                        const cleaned = cleanPhoneNumber(e.target.value);
+                        if (cleaned.length > 11) return;
+                        setSelectedUser({ ...selectedUser, phoneNumber: cleaned });
+                        if (cleaned.length > 0 && !validatePhoneNumber(cleaned)) {
+                          if (cleaned.length < 11) setEditPhoneError('Phone number must be 11 digits');
+                          else if (!cleaned.startsWith('09')) setEditPhoneError('Phone number must start with 09');
+                        } else {
+                          setEditPhoneError('');
+                        }
+                      }}
                       disabled={isViewMode}
-                      className="mt-1"
+                      required
+                      placeholder="09XX XXX XXXX"
+                      className={`mt-1 ${editPhoneError && !isViewMode ? 'border-red-500 focus:ring-red-500' : ''}`}
                     />
+                    {editPhoneError && !isViewMode && (
+                      <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />
+                        {editPhoneError}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <Label htmlFor="edit-gender">Gender <span className="text-red-500">*</span></Label>
@@ -1732,22 +1798,46 @@ export default function AccountManagementPage() {
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="edit-specialization">Specialization</Label>
+                      <Label htmlFor="edit-specialization">Specialization <span className="text-red-500">*</span></Label>
                       <Input
                         id="edit-specialization"
                         value={selectedUser.specialization}
                         onChange={(e) => setSelectedUser({ ...selectedUser, specialization: e.target.value })}
                         disabled={isViewMode}
+                        required
                         className="mt-1"
                       />
                     </div>
                     <div>
-                      <Label htmlFor="edit-licenseNumber">License Number</Label>
+                      <Label htmlFor="edit-licenseNumber">License Number <span className="text-red-500">*</span></Label>
                       <Input
                         id="edit-licenseNumber"
                         value={selectedUser.licenseNumber}
                         onChange={(e) => setSelectedUser({ ...selectedUser, licenseNumber: e.target.value })}
                         disabled={isViewMode}
+                        required
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="edit-clinicAssignment">Clinic Room</Label>
+                      <Input
+                        id="edit-clinicAssignment"
+                        value={selectedUser.clinicAssignment}
+                        onChange={(e) => setSelectedUser({ ...selectedUser, clinicAssignment: e.target.value })}
+                        disabled={isViewMode}
+                        placeholder="e.g., Room 101"
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="edit-scheduleAvailability">Schedule Availability</Label>
+                      <Input
+                        id="edit-scheduleAvailability"
+                        value={selectedUser.scheduleAvailability}
+                        onChange={(e) => setSelectedUser({ ...selectedUser, scheduleAvailability: e.target.value })}
+                        disabled={isViewMode}
+                        placeholder="e.g., Mon-Fri 9AM-5PM"
                         className="mt-1"
                       />
                     </div>
@@ -1762,22 +1852,24 @@ export default function AccountManagementPage() {
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="edit-designation">Designation</Label>
+                      <Label htmlFor="edit-designation">Position <span className="text-red-500">*</span></Label>
                       <Input
                         id="edit-designation"
                         value={selectedUser.designation}
                         onChange={(e) => setSelectedUser({ ...selectedUser, designation: e.target.value })}
                         disabled={isViewMode}
+                        required
                         className="mt-1"
                       />
                     </div>
                     <div>
-                      <Label htmlFor="edit-assignedDoctor">Assigned Doctor</Label>
+                      <Label htmlFor="edit-assignedDoctor">Assigned Doctor <span className="text-red-500">*</span></Label>
                       <Input
                         id="edit-assignedDoctor"
                         value={selectedUser.assignedDoctor}
                         onChange={(e) => setSelectedUser({ ...selectedUser, assignedDoctor: e.target.value })}
                         disabled={isViewMode}
+                        required
                         className="mt-1"
                       />
                     </div>
@@ -1808,7 +1900,11 @@ export default function AccountManagementPage() {
                         <Input
                           id="edit-emergencyContactName"
                           value={selectedUser.emergencyContactName}
-                          onChange={(e) => setSelectedUser({ ...selectedUser, emergencyContactName: e.target.value })}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            if (value && !isValidName(value)) return;
+                            setSelectedUser({ ...selectedUser, emergencyContactName: capitalizeNames(value) });
+                          }}
                           required
                           disabled={isViewMode}
                           className="mt-1"
@@ -1818,12 +1914,29 @@ export default function AccountManagementPage() {
                         <Label htmlFor="edit-emergencyContactNo">Emergency Contact Number <span className="text-red-500">*</span></Label>
                         <Input
                           id="edit-emergencyContactNo"
-                          value={selectedUser.emergencyContactNo}
-                          onChange={(e) => setSelectedUser({ ...selectedUser, emergencyContactNo: e.target.value })}
+                          value={formatPhoneNumber(selectedUser.emergencyContactNo)}
+                          onChange={(e) => {
+                            const cleaned = cleanPhoneNumber(e.target.value);
+                            if (cleaned.length > 11) return;
+                            setSelectedUser({ ...selectedUser, emergencyContactNo: cleaned });
+                            if (cleaned.length > 0 && !validatePhoneNumber(cleaned)) {
+                              if (cleaned.length < 11) setEditEmergencyPhoneError('Phone number must be 11 digits');
+                              else if (!cleaned.startsWith('09')) setEditEmergencyPhoneError('Phone number must start with 09');
+                            } else {
+                              setEditEmergencyPhoneError('');
+                            }
+                          }}
                           required
                           disabled={isViewMode}
-                          className="mt-1"
+                          placeholder="09XX XXX XXXX"
+                          className={`mt-1 ${editEmergencyPhoneError && !isViewMode ? 'border-red-500 focus:ring-red-500' : ''}`}
                         />
+                        {editEmergencyPhoneError && !isViewMode && (
+                          <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3" />
+                            {editEmergencyPhoneError}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1868,6 +1981,8 @@ export default function AccountManagementPage() {
                         onClick={(e) => {
                           e.preventDefault();
                           setIsViewMode(true); // Return to view mode without submitting
+                          setEditPhoneError(''); // Clear validation errors
+                          setEditEmergencyPhoneError('');
                         }}
                         disabled={isUpdating}
                         className="cursor-pointer active:scale-95 transition-transform disabled:cursor-not-allowed"
@@ -2012,6 +2127,18 @@ export default function AccountManagementPage() {
                             <div>
                               <p className="text-xs text-[hsl(258_22%_50%)]">License Number</p>
                               <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.licenseNumber}</p>
+                            </div>
+                          )}
+                          {newAccount.clinicAssignment && (
+                            <div>
+                              <p className="text-xs text-[hsl(258_22%_50%)]">Clinic Room</p>
+                              <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.clinicAssignment}</p>
+                            </div>
+                          )}
+                          {newAccount.scheduleAvailability && (
+                            <div>
+                              <p className="text-xs text-[hsl(258_22%_50%)]">Schedule Availability</p>
+                              <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.scheduleAvailability || 'To be configured'}</p>
                             </div>
                           )}
                         </>
