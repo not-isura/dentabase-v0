@@ -35,11 +35,48 @@ export default function SettingsProfilePage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
 
+  // Validation states
+  const [phoneError, setPhoneError] = useState('');
+  const [emergencyPhoneError, setEmergencyPhoneError] = useState('');
+
+  // Role-specific profiles (to be loaded)
+  const [dentistProfile, setDentistProfile] = useState<any>(null);
+  const [staffProfile, setStaffProfile] = useState<any>(null);
+
   // Editable fields (only for patients)
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [emergencyContactName, setEmergencyContactName] = useState("");
   const [emergencyContactNo, setEmergencyContactNo] = useState("");
+
+  // Helper functions for validation
+  const capitalizeNames = (name: string): string => {
+    return name.split(/(\s+|-)/)
+      .map((part) => part === ' ' || part === '-' ? part : 
+        part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+      .join('');
+  };
+
+  const isValidName = (name: string): boolean => {
+    return /^[a-zA-Z\s\-']*$/.test(name);
+  };
+
+  const formatPhoneNumber = (phone: string): string => {
+    const cleaned = phone.replace(/\D/g, '');
+    if (cleaned.length === 0) return '';
+    if (cleaned.length <= 4) return cleaned;
+    if (cleaned.length <= 7) return `${cleaned.slice(0, 4)} ${cleaned.slice(4)}`;
+    return `${cleaned.slice(0, 4)} ${cleaned.slice(4, 7)} ${cleaned.slice(7, 11)}`;
+  };
+
+  const cleanPhoneNumber = (phone: string): string => {
+    return phone.replace(/\D/g, '');
+  };
+
+  const validatePhoneNumber = (phone: string): boolean => {
+    const cleaned = cleanPhoneNumber(phone);
+    return cleaned.length === 11 && cleaned.startsWith('09');
+  };
 
   // Initialize editable fields when user data loads
   useEffect(() => {
@@ -53,8 +90,78 @@ export default function SettingsProfilePage() {
     }
   }, [user, patientProfile]);
 
+  // Fetch role-specific profiles for dentist and staff
+  useEffect(() => {
+    const fetchRoleProfile = async () => {
+      if (!user) return;
+
+      const supabase = createClient();
+
+      if (user.role === 'dentist') {
+        const { data, error } = await supabase
+          .from('doctors')
+          .select('*')
+          .eq('user_id', user.user_id)
+          .single();
+        
+        if (data) {
+          console.log('Dentist profile loaded:', data);
+          setDentistProfile(data);
+        }
+        if (error) {
+          console.error('Error loading dentist profile:', error);
+        }
+      } else if (user.role === 'dental_staff') {
+        // Join with doctors table to get doctor info, then join with users to get doctor's name
+        const { data, error } = await supabase
+          .from('staff')
+          .select(`
+            *,
+            doctors:doctor_id (
+              doctor_id,
+              users:user_id (
+                first_name,
+                middle_name,
+                last_name
+              )
+            )
+          `)
+          .eq('user_id', user.user_id)
+          .single();
+        
+        if (data) {
+          console.log('Staff profile loaded:', data);
+          setStaffProfile(data);
+        }
+        if (error) {
+          console.error('Error loading staff profile:', error);
+        }
+      }
+    };
+
+    fetchRoleProfile();
+  }, [user]);
+
   const handleSave = async () => {
     if (!user) return;
+
+    // Validate required fields
+    if (!phone || !address || !emergencyContactName || !emergencyContactNo) {
+      setError("Please fill in all required fields.");
+      return;
+    }
+
+    // Validate phone number
+    if (!validatePhoneNumber(phone)) {
+      setError("Phone number must be 11 digits starting with 09.");
+      return;
+    }
+
+    // Validate emergency contact phone
+    if (!validatePhoneNumber(emergencyContactNo)) {
+      setError("Emergency contact number must be 11 digits starting with 09.");
+      return;
+    }
 
     setIsSaving(true);
     setError(null);
@@ -87,6 +194,8 @@ export default function SettingsProfilePage() {
 
       setSuccessMessage("Profile updated successfully!");
       setIsEditing(false);
+      setPhoneError('');
+      setEmergencyPhoneError('');
 
       // Refresh Auth Context to show updated data
       await refreshUser();
@@ -111,6 +220,8 @@ export default function SettingsProfilePage() {
     }
     setIsEditing(false);
     setError(null);
+    setPhoneError('');
+    setEmergencyPhoneError('');
   };
 
   // Loading state
@@ -249,6 +360,19 @@ export default function SettingsProfilePage() {
             </div>
           </div>
 
+          {/* Phone Number */}
+          <div className="space-y-2">
+            <Label className="flex items-center text-[hsl(258_22%_50%)]">
+              <Phone className="h-4 w-4 mr-2" />
+              Phone Number
+            </Label>
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <p className="text-[hsl(258_46%_25%)]">
+                {user.phone_number ? formatPhoneNumber(user.phone_number) : "Not set"}
+              </p>
+            </div>
+          </div>
+
           {/* Role and Member Since */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -292,20 +416,39 @@ export default function SettingsProfilePage() {
             <div className="space-y-2">
               <Label htmlFor="phone" className="flex items-center text-[hsl(258_22%_50%)]">
                 <Phone className="h-4 w-4 mr-2" />
-                Phone Number
+                Phone Number <span className="text-red-500 ml-1">*</span>
               </Label>
               {isEditing ? (
-                <Input
-                  id="phone"
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+63 912 345 6789"
-                  className="border-[hsl(258_46%_25%/0.3)]"
-                />
+                <>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    value={formatPhoneNumber(phone)}
+                    onChange={(e) => {
+                      const cleaned = cleanPhoneNumber(e.target.value);
+                      if (cleaned.length > 11) return;
+                      setPhone(cleaned);
+                      if (cleaned.length > 0 && !validatePhoneNumber(cleaned)) {
+                        if (cleaned.length < 11) setPhoneError('Phone number must be 11 digits');
+                        else if (!cleaned.startsWith('09')) setPhoneError('Phone number must start with 09');
+                      } else {
+                        setPhoneError('');
+                      }
+                    }}
+                    placeholder="09XX XXX XXXX"
+                    required
+                    className={`border-[hsl(258_46%_25%/0.3)] ${phoneError ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  />
+                  {phoneError && (
+                    <p className="text-xs text-red-600 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      {phoneError}
+                    </p>
+                  )}
+                </>
               ) : (
                 <div className="p-3 bg-gray-50 rounded-lg">
-                  <p className="text-[hsl(258_46%_25%)]">{phone || "Not set"}</p>
+                  <p className="text-[hsl(258_46%_25%)]">{phone ? formatPhoneNumber(phone) : "Not set"}</p>
                 </div>
               )}
             </div>
@@ -314,7 +457,7 @@ export default function SettingsProfilePage() {
             <div className="space-y-2">
               <Label htmlFor="address" className="flex items-center text-[hsl(258_22%_50%)]">
                 <MapPin className="h-4 w-4 mr-2" />
-                Address
+                Address <span className="text-red-500 ml-1">*</span>
               </Label>
               {isEditing ? (
                 <textarea
@@ -323,6 +466,7 @@ export default function SettingsProfilePage() {
                   onChange={(e) => setAddress(e.target.value)}
                   placeholder="Enter your full address"
                   rows={3}
+                  required
                   className="w-full px-3 py-2 border border-[hsl(258_46%_25%/0.3)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%)]"
                 />
               ) : (
@@ -339,14 +483,19 @@ export default function SettingsProfilePage() {
               {/* Emergency Contact Name */}
               <div className="space-y-2 mb-4">
                 <Label htmlFor="emergencyName" className="text-[hsl(258_22%_50%)]">
-                  Contact Name
+                  Contact Name <span className="text-red-500 ml-1">*</span>
                 </Label>
                 {isEditing ? (
                   <Input
                     id="emergencyName"
                     value={emergencyContactName}
-                    onChange={(e) => setEmergencyContactName(e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value && !isValidName(value)) return;
+                      setEmergencyContactName(capitalizeNames(value));
+                    }}
                     placeholder="Full name of emergency contact"
+                    required
                     className="border-[hsl(258_46%_25%/0.3)]"
                   />
                 ) : (
@@ -359,20 +508,39 @@ export default function SettingsProfilePage() {
               {/* Emergency Contact Number */}
               <div className="space-y-2">
                 <Label htmlFor="emergencyPhone" className="text-[hsl(258_22%_50%)]">
-                  Contact Number
+                  Contact Number <span className="text-red-500 ml-1">*</span>
                 </Label>
                 {isEditing ? (
-                  <Input
-                    id="emergencyPhone"
-                    type="tel"
-                    value={emergencyContactNo}
-                    onChange={(e) => setEmergencyContactNo(e.target.value)}
-                    placeholder="+63 912 345 6789"
-                    className="border-[hsl(258_46%_25%/0.3)]"
-                  />
+                  <>
+                    <Input
+                      id="emergencyPhone"
+                      type="tel"
+                      value={formatPhoneNumber(emergencyContactNo)}
+                      onChange={(e) => {
+                        const cleaned = cleanPhoneNumber(e.target.value);
+                        if (cleaned.length > 11) return;
+                        setEmergencyContactNo(cleaned);
+                        if (cleaned.length > 0 && !validatePhoneNumber(cleaned)) {
+                          if (cleaned.length < 11) setEmergencyPhoneError('Phone number must be 11 digits');
+                          else if (!cleaned.startsWith('09')) setEmergencyPhoneError('Phone number must start with 09');
+                        } else {
+                          setEmergencyPhoneError('');
+                        }
+                      }}
+                      placeholder="09XX XXX XXXX"
+                      required
+                      className={`border-[hsl(258_46%_25%/0.3)] ${emergencyPhoneError ? 'border-red-500 focus:ring-red-500' : ''}`}
+                    />
+                    {emergencyPhoneError && (
+                      <p className="text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />
+                        {emergencyPhoneError}
+                      </p>
+                    )}
+                  </>
                 ) : (
                   <div className="p-3 bg-gray-50 rounded-lg">
-                    <p className="text-[hsl(258_46%_25%)]">{emergencyContactNo || "Not set"}</p>
+                    <p className="text-[hsl(258_46%_25%)]">{emergencyContactNo ? formatPhoneNumber(emergencyContactNo) : "Not set"}</p>
                   </div>
                 )}
               </div>
@@ -384,6 +552,7 @@ export default function SettingsProfilePage() {
                 <>
                   <Button
                     variant="outline"
+                    className='!bg-white hover:!bg-gray-50 cursor-pointer active:scale-95 transition-all border-gray-300'
                     onClick={handleCancel}
                     disabled={isSaving}
                   >
@@ -391,8 +560,8 @@ export default function SettingsProfilePage() {
                   </Button>
                   <Button
                     onClick={handleSave}
-                    disabled={isSaving || !phone}
-                    className="bg-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.9)]"
+                    disabled={isSaving || !phone || !address || !emergencyContactName || !emergencyContactNo || phoneError !== '' || emergencyPhoneError !== ''}
+                    className="bg-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_22%)] cursor-pointer text-white active:scale-95 transition-all disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isSaving ? "Saving..." : "Save Changes"}
                   </Button>
@@ -400,7 +569,7 @@ export default function SettingsProfilePage() {
               ) : (
                 <Button
                   onClick={() => setIsEditing(true)}
-                  className="bg-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.9)]"
+                  className="bg-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_22%)] text-white cursor-pointer active:scale-95 transition-all"
                 >
                   Edit Profile
                 </Button>
@@ -410,17 +579,76 @@ export default function SettingsProfilePage() {
         </Card>
       )}
 
-      {/* Non-Patient Users Card */}
-      {user.role !== "patient" && (
-        <Card className="bg-gray-50">
-          <CardContent className="text-center py-12">
-            <Shield className="h-12 w-12 mx-auto mb-4 text-[hsl(258_46%_25%)]" />
-            <h3 className="text-lg font-semibold text-[hsl(258_46%_25%)] mb-2">
-              Staff/Dentist Profile
-            </h3>
-            <p className="text-[hsl(258_22%_50%)]">
-              Additional profile features for staff members will be available soon.
-            </p>
+      {/* Non-Patient Users Card - Dentist/Staff Profile */}
+      {user.role !== "patient" && user.role !== "admin" && (
+        <Card className="bg-white">
+          <CardHeader>
+            <CardTitle className="flex items-center text-[hsl(258_46%_25%)]">
+              <Shield className="h-5 w-5 mr-2" />
+              {user.role === 'dentist' ? 'Dentist Information' : 'Staff Information'}
+            </CardTitle>
+            <CardDescription className="text-[hsl(258_22%_50%)]">
+              Your professional information (read-only)
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {user.role === 'dentist' && dentistProfile && (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-[hsl(258_22%_50%)]">Specialization</Label>
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <p className="text-[hsl(258_46%_25%)]">{dentistProfile.specialization || "Not set"}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[hsl(258_22%_50%)]">License Number</Label>
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <p className="text-[hsl(258_46%_25%)]">{dentistProfile.license_number || "Not set"}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-[hsl(258_22%_50%)]">Room Number</Label>
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <p className="text-[hsl(258_46%_25%)]">{dentistProfile.room_number || "Not assigned"}</p>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {user.role === 'dental_staff' && staffProfile && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-[hsl(258_22%_50%)]">Position</Label>
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <p className="text-[hsl(258_46%_25%)]">{staffProfile.position_title || "Not set"}</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-[hsl(258_22%_50%)]">Assigned Doctor</Label>
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <p className="text-[hsl(258_46%_25%)]">
+                      {staffProfile.doctors?.users 
+                        ? `Dr. ${staffProfile.doctors.users.first_name} ${staffProfile.doctors.users.middle_name ? staffProfile.doctors.users.middle_name + ' ' : ''}${staffProfile.doctors.users.last_name}`
+                        : "Not assigned"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!dentistProfile && !staffProfile && (
+              <div className="text-center py-8">
+                <p className="text-[hsl(258_22%_50%)]">No additional profile information available.</p>
+              </div>
+            )}
+
+            <div className="pt-4 border-t">
+              <p className="text-sm text-[hsl(258_22%_50%)] italic">
+                Professional information cannot be edited directly. Please contact your administrator for updates.
+              </p>
+            </div>
           </CardContent>
         </Card>
       )}
