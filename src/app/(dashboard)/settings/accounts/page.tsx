@@ -184,6 +184,12 @@ export default function AccountManagementPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [newAccount, setNewAccount] = useState<NewAccount>(INITIAL_ACCOUNT_STATE);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  
+  // New states for validation and confirmation
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [emergencyPhoneError, setEmergencyPhoneError] = useState('');
 
   // Manage Users Tab State
   const [existingUsers, setExistingUsers] = useState<ExistingUser[]>([]);
@@ -434,7 +440,135 @@ export default function AccountManagementPage() {
     }
   };
 
+  // Helper function: Capitalize names properly
+  const capitalizeNames = (name: string): string => {
+    if (!name) return '';
+    
+    // Split by spaces and hyphens, capitalize each part
+    return name
+      .split(/(\s+|-)/)
+      .map((part) => {
+        if (part === ' ' || part === '-') return part;
+        return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+      })
+      .join('');
+  };
+
+  // Helper function: Validate name (letters, spaces, hyphens, apostrophes only)
+  const isValidName = (name: string): boolean => {
+    return /^[a-zA-Z\s\-']*$/.test(name);
+  };
+
+  // Helper function: Validate email comprehensively
+  const validateEmail = (email: string): boolean => {
+    // Basic pattern: something@domain.extension
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+    
+    if (!emailRegex.test(email)) return false;
+    
+    // Additional check: domain should have at least 2 chars before the dot
+    const parts = email.split('@');
+    if (parts.length !== 2) return false;
+    
+    const domain = parts[1];
+    const domainParts = domain.split('.');
+    
+    // Domain before dot should have at least 2 characters
+    if (domainParts[0].length < 2) return false;
+    
+    return true;
+  };
+
+  // Helper function: Format phone number for display (09XX XXX XXXX)
+  const formatPhoneNumber = (phone: string): string => {
+    const cleaned = phone.replace(/\D/g, '');
+    
+    if (cleaned.length === 0) return '';
+    if (cleaned.length <= 4) return cleaned;
+    if (cleaned.length <= 7) return `${cleaned.slice(0, 4)} ${cleaned.slice(4)}`;
+    return `${cleaned.slice(0, 4)} ${cleaned.slice(4, 7)} ${cleaned.slice(7, 11)}`;
+  };
+
+  // Helper function: Clean phone number (remove formatting)
+  const cleanPhoneNumber = (phone: string): string => {
+    return phone.replace(/\D/g, '');
+  };
+
+  // Helper function: Validate phone number (11 digits starting with 09)
+  const validatePhoneNumber = (phone: string): boolean => {
+    const cleaned = cleanPhoneNumber(phone);
+    return cleaned.length === 11 && cleaned.startsWith('09');
+  };
+
   const handleInputChange = (field: keyof NewAccount, value: string) => {
+    // Handle name fields with auto-capitalization and validation
+    if (field === 'firstName' || field === 'middleName' || field === 'lastName' || field === 'emergencyContactName') {
+      // Only allow valid characters
+      if (value && !isValidName(value)) {
+        return; // Block invalid characters
+      }
+      
+      const capitalized = capitalizeNames(value);
+      setNewAccount(prev => ({ ...prev, [field]: capitalized }));
+      return;
+    }
+    
+    // Handle email field with validation
+    if (field === 'email') {
+      setNewAccount(prev => ({ ...prev, email: value }));
+      
+      if (value && !validateEmail(value)) {
+        setEmailError('Please enter a valid email address (e.g., name@domain.com)');
+      } else {
+        setEmailError('');
+      }
+      return;
+    }
+    
+    // Handle phone number fields with formatting and validation
+    if (field === 'phoneNumber') {
+      const cleaned = cleanPhoneNumber(value);
+      
+      // Only allow up to 11 digits
+      if (cleaned.length > 11) return;
+      
+      const formatted = formatPhoneNumber(cleaned);
+      setNewAccount(prev => ({ ...prev, phoneNumber: cleaned }));
+      
+      if (cleaned.length > 0 && !validatePhoneNumber(cleaned)) {
+        if (cleaned.length < 11) {
+          setPhoneError('Phone number must be 11 digits');
+        } else if (!cleaned.startsWith('09')) {
+          setPhoneError('Phone number must start with 09');
+        }
+      } else {
+        setPhoneError('');
+      }
+      return;
+    }
+    
+    // Handle emergency contact phone number separately
+    if (field === 'emergencyContactNo') {
+      const cleaned = cleanPhoneNumber(value);
+      
+      // Only allow up to 11 digits
+      if (cleaned.length > 11) return;
+      
+      const formatted = formatPhoneNumber(cleaned);
+      setNewAccount(prev => ({ ...prev, emergencyContactNo: cleaned }));
+      
+      if (cleaned.length > 0 && !validatePhoneNumber(cleaned)) {
+        if (cleaned.length < 11) {
+          setEmergencyPhoneError('Phone number must be 11 digits');
+        } else if (!cleaned.startsWith('09')) {
+          setEmergencyPhoneError('Phone number must start with 09');
+        }
+      } else {
+        setEmergencyPhoneError('');
+      }
+      return;
+    }
+    
     setNewAccount(prev => ({ 
       ...prev, 
       [field]: field === 'emailVerified' ? value === 'true' : value 
@@ -470,9 +604,65 @@ export default function AccountManagementPage() {
     }));
   };
 
-  const handleCreateAccount = async (e: React.FormEvent<HTMLFormElement>) => {
+  // Handle form submission - show confirmation modal first
+  const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    
+    // Validate required fields
+    if (!newAccount.firstName || !newAccount.lastName || !newAccount.email || !newAccount.phoneNumber) {
+      showNotification('error', 'Validation Error', 'Please fill in all required fields.', []);
+      return;
+    }
+    
+    // Validate email
+    if (!validateEmail(newAccount.email)) {
+      showNotification('error', 'Invalid Email', 'Please enter a valid email address.', []);
+      return;
+    }
+    
+    // Validate phone number (now required)
+    if (!validatePhoneNumber(newAccount.phoneNumber)) {
+      showNotification('error', 'Invalid Phone Number', 'Phone number must be 11 digits starting with 09.', []);
+      return;
+    }
+    
+    // Validate dentist-specific required fields
+    if (newAccount.role === 'dentist') {
+      if (!newAccount.specialization || !newAccount.licenseNumber || !newAccount.clinicAssignment) {
+        showNotification('error', 'Validation Error', 'Please fill in all required dentist fields (Specialization, License Number, Clinic Room).', []);
+        return;
+      }
+    }
+    
+    // Validate dental staff-specific required fields
+    if (newAccount.role === 'dental_staff') {
+      if (!newAccount.designation || !newAccount.assignedDoctor) {
+        showNotification('error', 'Validation Error', 'Please fill in all required staff fields (Position, Assigned Doctor).', []);
+        return;
+      }
+    }
+    
+    // Validate patient-specific required fields
+    if (newAccount.role === 'patient') {
+      if (!newAccount.address || !newAccount.emergencyContactName || !newAccount.emergencyContactNo) {
+        showNotification('error', 'Validation Error', 'Please fill in all required patient fields.', []);
+        return;
+      }
+      
+      // Validate emergency contact phone number
+      if (!validatePhoneNumber(newAccount.emergencyContactNo)) {
+        showNotification('error', 'Invalid Emergency Contact Number', 'Emergency contact number must be 11 digits starting with 09.', []);
+        return;
+      }
+    }
+    
+    // Show confirmation modal
+    setShowConfirmModal(true);
+  };
+
+  const handleCreateAccount = async () => {
     setIsSaving(true);
+    setShowConfirmModal(false);
 
     const roleLabel = ROLE_LABEL_MAP[newAccount.role];
 
@@ -533,6 +723,9 @@ export default function AccountManagementPage() {
       
       // Clear password after showing it
       setShowPassword(false);
+      // Clear errors
+      setEmailError('');
+      setPhoneError('');
     } catch (error: any) {
       console.error("Error creating account:", error);
       showNotification(
@@ -772,7 +965,7 @@ export default function AccountManagementPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleCreateAccount} className="space-y-8">
+              <form onSubmit={handleFormSubmit} className="space-y-8">
                 <section className="space-y-4">
                   <div>
                     <h3 className="text-sm font-semibold uppercase tracking-wide text-[hsl(258_22%_50%)]">General Information</h3>
@@ -796,10 +989,10 @@ export default function AccountManagementPage() {
                         id="middleName"
                         value={newAccount.middleName}
                         onChange={(e) => handleInputChange("middleName", e.target.value)}
-                        placeholder="Optional"
+                        placeholder="Santos"
                         className="mt-1"
                       />
-                      <p className="mt-1 text-xs text-gray-500">Optional field – can be updated later.</p>
+                      {/* <p className="mt-1 text-xs text-gray-500">Optional field – can be updated later.</p> */}
                     </div>
                     <div>
                       <Label htmlFor="lastName">Last Name <span className="text-red-500">*</span></Label>
@@ -824,19 +1017,31 @@ export default function AccountManagementPage() {
                         onChange={(e) => handleInputChange("email", e.target.value)}
                         required
                         placeholder="name@dentabase.com"
-                        className="mt-1"
+                        className={`mt-1 ${emailError ? 'border-red-500 focus:ring-red-500' : ''}`}
                       />
+                      {emailError && (
+                        <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" />
+                          {emailError}
+                        </p>
+                      )}
                     </div>
                     <div>
-                      <Label htmlFor="phoneNumber">Phone Number</Label>
+                      <Label htmlFor="phoneNumber">Phone Number <span className="text-red-500">*</span></Label>
                       <Input
                         id="phoneNumber"
-                        value={newAccount.phoneNumber}
+                        value={formatPhoneNumber(newAccount.phoneNumber)}
                         onChange={(e) => handleInputChange("phoneNumber", e.target.value)}
-                        placeholder="Optional"
-                        className="mt-1"
+                        placeholder="09XX XXX XXXX"
+                        required
+                        className={`mt-1 ${phoneError ? 'border-red-500 focus:ring-red-500' : ''}`}
                       />
-                      <p className="mt-1 text-xs text-gray-500">Optional field – can be updated later.</p>
+                      {phoneError && (
+                        <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" />
+                          {phoneError}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <Label htmlFor="gender">Gender <span className="text-red-500">*</span></Label>
@@ -845,7 +1050,7 @@ export default function AccountManagementPage() {
                         value={newAccount.gender}
                         onChange={(e) => handleInputChange("gender", e.target.value)}
                         required
-                        className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="mt-1 h-10 w-full rounded-md border-1 border-[hsl(258_22%_90%)] bg-white pl-3 pr-8 py-2 text-sm text-[hsl(258_46%_25%)] placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)] focus:border-[hsl(258_46%_25%)] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer transition-all"
                       >
                         <option value="unspecified">Prefer not to say</option>
                         <option value="male">Male</option>
@@ -886,7 +1091,7 @@ export default function AccountManagementPage() {
                         id="role"
                         value={newAccount.role}
                         onChange={(e) => handleRoleChange(e.target.value as UserRole)}
-                        className="mt-1 h-10 w-full rounded-md border border-[hsl(258_22%_90%)] bg-white px-3 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)]"
+                        className="mt-1 h-10 w-full rounded-md border-1 border-[hsl(258_22%_90%)] bg-white pl-3 pr-8 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)] focus:border-[hsl(258_46%_25%)] cursor-pointer transition-all"
                       >
                         <option value="admin">Admin</option>
                         <option value="dentist">Dentist</option>
@@ -900,7 +1105,7 @@ export default function AccountManagementPage() {
                         <button
                           type="button"
                           onClick={() => handleInputChange("emailVerified", String(!newAccount.emailVerified))}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%)] focus:ring-offset-2 ${
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%)] focus:ring-offset-2 cursor-pointer ${
                             newAccount.emailVerified ? 'bg-[hsl(258_46%_25%)]' : 'bg-gray-300'
                           }`}
                         >
@@ -932,37 +1137,37 @@ export default function AccountManagementPage() {
                   {newAccount.role === "dentist" && (
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <div className="md:col-span-2">
-                        <Label htmlFor="specialization">Specialization</Label>
+                        <Label htmlFor="specialization">Specialization <span className="text-red-500">*</span></Label>
                         <Input
                           id="specialization"
                           value={newAccount.specialization}
                           onChange={(e) => handleInputChange("specialization", e.target.value)}
                           placeholder="e.g., General Dentistry, Orthodontics"
                           className="mt-1"
+                          required
                         />
-                        <p className="mt-1 text-xs text-gray-500">Optional field – can be updated later.</p>
                       </div>
                       <div>
-                        <Label htmlFor="licenseNumber">License / PRC Number</Label>
+                        <Label htmlFor="licenseNumber">License Number <span className="text-red-500">*</span></Label>
                         <Input
                           id="licenseNumber"
                           value={newAccount.licenseNumber}
                           onChange={(e) => handleInputChange("licenseNumber", e.target.value)}
-                          placeholder="Optional"
+                          placeholder="e.g., 123456"
                           className="mt-1"
+                          required
                         />
-                        <p className="mt-1 text-xs text-gray-500">Optional field – can be updated later.</p>
                       </div>
                       <div>
-                        <Label htmlFor="clinicAssignment">Clinic Room / Chair Assignment</Label>
+                        <Label htmlFor="clinicAssignment">Clinic Room Assignment <span className="text-red-500">*</span></Label>
                         <Input
                           id="clinicAssignment"
                           value={newAccount.clinicAssignment}
                           onChange={(e) => handleInputChange("clinicAssignment", e.target.value)}
-                          placeholder="Optional"
+                          placeholder="e.g., Room 101"
                           className="mt-1"
+                          required
                         />
-                        <p className="mt-1 text-xs text-gray-500">Optional field – can be updated later.</p>
                       </div>
                       <div className="md:col-span-2">
                         <Label htmlFor="scheduleAvailability">Schedule Availability</Label>
@@ -981,25 +1186,26 @@ export default function AccountManagementPage() {
                   {newAccount.role === "dental_staff" && (
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <div>
-                        <Label htmlFor="designation">Position / Designation</Label>
+                        <Label htmlFor="designation">Position / Designation <span className="text-red-500">*</span></Label>
                         <Input
                           id="designation"
                           value={newAccount.designation}
                           onChange={(e) => handleInputChange("designation", e.target.value)}
                           placeholder="e.g., Dental Assistant, Hygienist"
                           className="mt-1"
+                          required
                         />
-                        <p className="mt-1 text-xs text-gray-500">Optional field – can be updated later.</p>
                       </div>
                       <div>
-                        <Label htmlFor="assignedDoctor">Assigned Doctor</Label>
+                        <Label htmlFor="assignedDoctor">Assigned Doctor <span className="text-red-500">*</span></Label>
                         <select
                           id="assignedDoctor"
                           value={newAccount.assignedDoctor}
                           onChange={(e) => handleInputChange("assignedDoctor", e.target.value)}
-                          className="mt-1 w-full rounded-md border border-[hsl(258_22%_90%)] bg-white px-3 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)]"
+                          className="mt-1 h-10 w-full rounded-md border-1 border-[hsl(258_22%_90%)] bg-white pl-3 pr-8 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)] focus:border-[hsl(258_46%_25%)] cursor-pointer transition-all"
+                          required
                         >
-                          <option value="">Select doctor (optional)</option>
+                          <option value="">Select doctor</option>
                           <option value="dr-john-doe">Dr. John Doe</option>
                           <option value="dr-jane-smith">Dr. Jane Smith</option>
                         </select>
@@ -1032,19 +1238,23 @@ export default function AccountManagementPage() {
                           className="mt-1"
                           required
                         />
-                        <p className="mt-1 text-xs text-gray-500">Name of emergency contact person.</p>
                       </div>
                       <div>
                         <Label htmlFor="emergencyContactNo">Emergency Contact Number <span className="text-red-500">*</span></Label>
                         <Input
                           id="emergencyContactNo"
-                          value={newAccount.emergencyContactNo}
+                          value={formatPhoneNumber(newAccount.emergencyContactNo)}
                           onChange={(e) => handleInputChange("emergencyContactNo", e.target.value)}
-                          placeholder="Phone number"
-                          className="mt-1"
+                          placeholder="09XX XXX XXXX"
+                          className={`mt-1 ${emergencyPhoneError ? 'border-red-500 focus:ring-red-500' : ''}`}
                           required
                         />
-                        <p className="mt-1 text-xs text-gray-500">Contact number for emergencies.</p>
+                        {emergencyPhoneError && (
+                          <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3" />
+                            {emergencyPhoneError}
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1489,7 +1699,7 @@ export default function AccountManagementPage() {
                       onChange={(e) => setSelectedUser({ ...selectedUser, gender: e.target.value as any })}
                       required
                       disabled={isViewMode}
-                      className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="mt-1 h-10 w-full rounded-md border-1 border-[hsl(258_22%_90%)] bg-white pl-3 pr-8 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)] focus:border-[hsl(258_46%_25%)] cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-50"
                     >
                       <option value="unspecified">Prefer not to say</option>
                       <option value="male">Male</option>
@@ -1497,7 +1707,7 @@ export default function AccountManagementPage() {
                       <option value="other">Other</option>
                     </select>
                   </div>
-                  <div>
+                  <div> 
                     <Label htmlFor="edit-status">Status <span className="text-red-500">*</span></Label>
                     <select
                       id="edit-status"
@@ -1505,7 +1715,7 @@ export default function AccountManagementPage() {
                       onChange={(e) => setSelectedUser({ ...selectedUser, status: e.target.value as AccountStatus })}
                       required
                       disabled={isViewMode}
-                      className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="mt-1 h-10 w-full rounded-md border-1 border-[hsl(258_22%_90%)] bg-white pl-3 pr-8 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)] focus:border-[hsl(258_46%_25%)] cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-50"
                     >
                       <option value="active">Active</option>
                       <option value="inactive">Inactive</option>
@@ -1691,6 +1901,195 @@ export default function AccountManagementPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Account Creation */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-full bg-[hsl(258_46%_95%)] flex items-center justify-center">
+                    <UserCheck className="h-6 w-6 text-[hsl(258_46%_25%)]" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-[hsl(258_46%_25%)]">Confirm Account Creation</h3>
+                    <p className="text-sm text-[hsl(258_22%_50%)]">Please review the information before creating the account</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmModal(false)}
+                  className="text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] cursor-pointer active:scale-90 transition-transform"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* Account Information Display */}
+              <div className="space-y-6">
+                {/* General Information */}
+                <div className="border-b border-[hsl(258_22%_90%)] pb-4">
+                  <h4 className="text-sm font-semibold uppercase tracking-wide text-[hsl(258_22%_50%)] mb-3">
+                    General Information
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-[hsl(258_22%_50%)]">Full Name</p>
+                      <p className="text-sm font-medium text-[hsl(258_46%_25%)]">
+                        {newAccount.firstName} {newAccount.middleName && `${newAccount.middleName} `}{newAccount.lastName}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[hsl(258_22%_50%)]">Email Address</p>
+                      <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.email}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[hsl(258_22%_50%)]">Phone Number</p>
+                      <p className="text-sm font-medium text-[hsl(258_46%_25%)]">
+                        {newAccount.phoneNumber ? formatPhoneNumber(newAccount.phoneNumber) : 'Not provided'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[hsl(258_22%_50%)]">Gender</p>
+                      <p className="text-sm font-medium text-[hsl(258_46%_25%)]">
+                        {newAccount.gender === 'male' ? 'Male' : newAccount.gender === 'female' ? 'Female' : newAccount.gender === 'other' ? 'Other' : 'Prefer not to say'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Account Settings */}
+                <div className="border-b border-[hsl(258_22%_90%)] pb-4">
+                  <h4 className="text-sm font-semibold uppercase tracking-wide text-[hsl(258_22%_50%)] mb-3">
+                    Account Settings
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-[hsl(258_22%_50%)]">Role</p>
+                      <p className="text-sm font-medium text-[hsl(258_46%_25%)]">
+                        {ROLE_LABEL_MAP[newAccount.role]}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[hsl(258_22%_50%)]">Status</p>
+                      <p className="text-sm font-medium text-[hsl(258_46%_25%)]">
+                        {newAccount.status === 'active' ? 'Active' : 'Inactive'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[hsl(258_22%_50%)]">Temporary Password</p>
+                      <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.tempPassword}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[hsl(258_22%_50%)]">Email Verification</p>
+                      <p className="text-sm font-medium text-[hsl(258_46%_25%)]">
+                        {newAccount.emailVerified ? 'Auto-verified (can login immediately)' : 'Requires email verification'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Role-Specific Information */}
+                {(newAccount.role === 'dentist' || newAccount.role === 'dental_staff' || newAccount.role === 'patient') && (
+                  <div>
+                    <h4 className="text-sm font-semibold uppercase tracking-wide text-[hsl(258_22%_50%)] mb-3">
+                      Role-Specific Information
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      {newAccount.role === 'dentist' && (
+                        <>
+                          {newAccount.specialization && (
+                            <div>
+                              <p className="text-xs text-[hsl(258_22%_50%)]">Specialization</p>
+                              <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.specialization}</p>
+                            </div>
+                          )}
+                          {newAccount.licenseNumber && (
+                            <div>
+                              <p className="text-xs text-[hsl(258_22%_50%)]">License Number</p>
+                              <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.licenseNumber}</p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {newAccount.role === 'dental_staff' && (
+                        <>
+                          {newAccount.designation && (
+                            <div>
+                              <p className="text-xs text-[hsl(258_22%_50%)]">Designation</p>
+                              <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.designation}</p>
+                            </div>
+                          )}
+                          {newAccount.assignedDoctor && (
+                            <div>
+                              <p className="text-xs text-[hsl(258_22%_50%)]">Assigned Doctor</p>
+                              <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.assignedDoctor}</p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {newAccount.role === 'patient' && (
+                        <>
+                          {newAccount.address && (
+                            <div className="col-span-2">
+                              <p className="text-xs text-[hsl(258_22%_50%)]">Address</p>
+                              <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.address}</p>
+                            </div>
+                          )}
+                          {newAccount.emergencyContactName && (
+                            <div>
+                              <p className="text-xs text-[hsl(258_22%_50%)]">Emergency Contact</p>
+                              <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.emergencyContactName}</p>
+                            </div>
+                          )}
+                          {newAccount.emergencyContactNo && (
+                            <div>
+                              <p className="text-xs text-[hsl(258_22%_50%)]">Emergency Contact Number</p>
+                              <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.emergencyContactNo}</p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-[hsl(258_22%_90%)]">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowConfirmModal(false)}
+                  disabled={isSaving}
+                  className="cursor-pointer active:scale-95 transition-transform disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleCreateAccount}
+                  disabled={isSaving}
+                  className="bg-[hsl(258_46%_25%)] text-white hover:bg-[hsl(258_46%_22%)] cursor-pointer active:scale-95 transition-transform disabled:cursor-not-allowed"
+                >
+                  {isSaving ? (
+                    <>
+                      <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      Creating Account...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Confirm & Create Account
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}
