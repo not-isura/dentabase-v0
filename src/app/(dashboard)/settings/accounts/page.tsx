@@ -195,6 +195,23 @@ export default function AccountManagementPage() {
   const [editPhoneError, setEditPhoneError] = useState('');
   const [editEmergencyPhoneError, setEditEmergencyPhoneError] = useState('');
 
+  // Schedule availability state
+  type DaySchedule = { startTime: string; endTime: string };
+  type WeekSchedule = {
+    monday?: DaySchedule;
+    tuesday?: DaySchedule;
+    wednesday?: DaySchedule;
+    thursday?: DaySchedule;
+    friday?: DaySchedule;
+    saturday?: DaySchedule;
+    sunday?: DaySchedule;
+  };
+  const [selectedDays, setSelectedDays] = useState<string[]>([]);
+  const [weekSchedule, setWeekSchedule] = useState<WeekSchedule>({});
+  const [scheduleError, setScheduleError] = useState<string>('');
+  const [scheduleErrors, setScheduleErrors] = useState<Record<string, string>>({}); // Individual errors per day
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null); // Track which dropdown is open
+
   // Manage Users Tab State
   const [existingUsers, setExistingUsers] = useState<ExistingUser[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
@@ -227,6 +244,18 @@ export default function AccountManagementPage() {
       setCurrentPage(1); // Reset to first page when filters change
     }
   }, [activeTab, roleFilter, statusFilter, searchQuery]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.custom-dropdown')) {
+        setOpenDropdown(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Calculate pagination
   const totalPages = Math.ceil(existingUsers.length / ITEMS_PER_PAGE);
@@ -534,6 +563,179 @@ export default function AccountManagementPage() {
     return cleaned.length === 11 && cleaned.startsWith('09');
   };
 
+  // Helper function: Generate time options (15-minute intervals)
+  const generateTimeOptions = (): string[] => {
+    const times: string[] = [];
+    for (let hour = 0; hour < 24; hour++) {
+      for (let minute = 0; minute < 60; minute += 15) {
+        const period = hour >= 12 ? 'PM' : 'AM';
+        const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+        const formattedMinute = minute.toString().padStart(2, '0');
+        times.push(`${displayHour.toString().padStart(2, '0')}:${formattedMinute} ${period}`);
+      }
+    }
+    return times;
+  };
+
+  // Helper function: Parse time string to components
+  const parseTime = (timeString: string): { hour: string; minute: string; period: string } => {
+    const [time, period] = timeString.split(' ');
+    const [hour, minute] = time.split(':');
+    return { hour, minute, period };
+  };
+
+  // Helper function: Build time string from components
+  const buildTimeString = (hour: string, minute: string, period: string): string => {
+    return `${hour.padStart(2, '0')}:${minute} ${period}`;
+  };
+
+  // Helper function: Toggle day selection
+  const toggleDay = (day: string) => {
+    setScheduleError('');
+    if (selectedDays.includes(day)) {
+      // Remove day
+      setSelectedDays(prev => prev.filter(d => d !== day));
+      // Remove schedule for that day
+      setWeekSchedule(prev => {
+        const updated = { ...prev };
+        delete updated[day.toLowerCase() as keyof WeekSchedule];
+        return updated;
+      });
+      // Remove error for that day
+      setScheduleErrors(prev => {
+        const updated = { ...prev };
+        delete updated[day];
+        return updated;
+      });
+    } else {
+      // Add day with default time
+      setSelectedDays(prev => [...prev, day]);
+      setWeekSchedule(prev => ({
+        ...prev,
+        [day.toLowerCase()]: { startTime: '09:00 AM', endTime: '05:00 PM' }
+      }));
+    }
+  };
+
+  // Helper function: Update schedule time
+  const updateScheduleTime = (day: string, field: 'startTime' | 'endTime', value: string) => {
+    setScheduleError('');
+    setWeekSchedule(prev => {
+      const dayKey = day.toLowerCase() as keyof WeekSchedule;
+      const currentSchedule = prev[dayKey] || { startTime: '09:00 AM', endTime: '05:00 PM' };
+      
+      const updated = {
+        ...prev,
+        [dayKey]: {
+          ...currentSchedule,
+          [field]: value
+        }
+      };
+
+      // Validate that end time is after start time
+      const schedule = updated[dayKey]!;
+      if (!isValidTimeRange(schedule.startTime, schedule.endTime)) {
+        setScheduleError(`${day}: End time must be later than start time`);
+      }
+
+      return updated;
+    });
+  };
+
+  // Helper function: Update time component (hour, minute, or period)
+  const updateTimeComponent = (
+    day: string, 
+    field: 'startTime' | 'endTime', 
+    component: 'hour' | 'minute' | 'period', 
+    value: string
+  ) => {
+    // Clear main schedule error
+    setScheduleError('');
+    
+    // Clear error for this specific day
+    setScheduleErrors(prev => {
+      const updated = { ...prev };
+      delete updated[day];
+      return updated;
+    });
+    
+    setWeekSchedule(prev => {
+      const dayKey = day.toLowerCase() as keyof WeekSchedule;
+      const currentSchedule = prev[dayKey] || { startTime: '09:00 AM', endTime: '05:00 PM' };
+      
+      // Parse current time
+      const currentTime = parseTime(currentSchedule[field]);
+      
+      // Update the specific component
+      const updatedTime = {
+        hour: component === 'hour' ? value : currentTime.hour,
+        minute: component === 'minute' ? value : currentTime.minute,
+        period: component === 'period' ? value : currentTime.period,
+      };
+      
+      // Build new time string
+      const newTimeString = buildTimeString(updatedTime.hour, updatedTime.minute, updatedTime.period);
+      
+      const updated = {
+        ...prev,
+        [dayKey]: {
+          ...currentSchedule,
+          [field]: newTimeString
+        }
+      };
+
+      // Validate that end time is after start time
+      const schedule = updated[dayKey]!;
+      if (!isValidTimeRange(schedule.startTime, schedule.endTime)) {
+        // Set error for this specific day
+        setScheduleErrors(prevErrors => ({
+          ...prevErrors,
+          [day]: 'End time must be later than start time'
+        }));
+      }
+
+      return updated;
+    });
+  };
+
+  // Helper function: Validate time range
+  const isValidTimeRange = (startTime: string, endTime: string): boolean => {
+    const parseTime = (time: string): number => {
+      const [timePart, period] = time.split(' ');
+      let [hours, minutes] = timePart.split(':').map(Number);
+      
+      if (period === 'PM' && hours !== 12) hours += 12;
+      if (period === 'AM' && hours === 12) hours = 0;
+      
+      return hours * 60 + minutes;
+    };
+
+    return parseTime(endTime) > parseTime(startTime);
+  };
+
+  // Helper function: Sort days in week order
+  const sortDaysInWeekOrder = (days: string[]): string[] => {
+    const weekOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    return days.sort((a, b) => weekOrder.indexOf(a) - weekOrder.indexOf(b));
+  };
+
+  // Helper function: Format schedule for storage
+  const formatScheduleForStorage = (): string => {
+    if (selectedDays.length === 0) return '';
+    
+    // Sort days in week order before formatting
+    const sortedDays = sortDaysInWeekOrder(selectedDays);
+    
+    const scheduleLines = sortedDays.map(day => {
+      const dayKey = day.toLowerCase() as keyof WeekSchedule;
+      const schedule = weekSchedule[dayKey];
+      if (!schedule) return '';
+      return `${day}: ${schedule.startTime} - ${schedule.endTime}`;
+    }).filter(Boolean);
+
+    return scheduleLines.join('\n');
+  };
+
   const handleInputChange = (field: keyof NewAccount, value: string) => {
     // Handle name fields with auto-capitalization and validation
     if (field === 'firstName' || field === 'middleName' || field === 'lastName' || field === 'emergencyContactName') {
@@ -666,6 +868,22 @@ export default function AccountManagementPage() {
         showNotification('error', 'Validation Error', 'Please fill in all required dentist fields (Specialization, License Number, Clinic Room).', []);
         return;
       }
+      
+      // Check if schedule availability is provided
+      if (selectedDays.length === 0) {
+        setScheduleError('Please select at least one day for schedule availability.');
+        return;
+      }
+      
+      // Check for any schedule errors
+      const errorDays = Object.keys(scheduleErrors);
+      if (errorDays.length > 0) {
+        setScheduleError('Please fix the time range errors in the selected days.');
+        return;
+      }
+      
+      // Clear schedule error if validation passes
+      setScheduleError('');
     }
     
     // Validate dental staff-specific required fields
@@ -722,6 +940,7 @@ export default function AccountManagementPage() {
           specialization: newAccount.specialization,
           licenseNumber: newAccount.licenseNumber,
           clinicAssignment: newAccount.clinicAssignment,
+          scheduleAvailability: formatScheduleForStorage(),
           // Staff-specific fields
           designation: newAccount.designation,
           assignedDoctor: newAccount.assignedDoctor,
@@ -760,6 +979,12 @@ export default function AccountManagementPage() {
       // Clear errors
       setEmailError('');
       setPhoneError('');
+      setEmergencyPhoneError('');
+      // Clear schedule
+      setSelectedDays([]);
+      setWeekSchedule({});
+      setScheduleError('');
+      setScheduleErrors({});
     } catch (error: any) {
       console.error("Error creating account:", error);
       showNotification(
@@ -989,7 +1214,7 @@ export default function AccountManagementPage() {
       {/* Create Accounts Tab */}
       {activeTab === "create" && (
         <div id="tab-create-panel" aria-labelledby="tab-create" role="tabpanel" className="space-y-6">
-          <Card className="mx-auto max-w-4xl bg-white">
+          <Card className="mx-auto max-w-4xl bg-white mb-10">
             <CardHeader>
               <CardTitle className="text-[hsl(258_46%_25%)] flex items-center gap-2">
                 <UserPlus className="h-5 w-5" /> Create Account
@@ -1204,15 +1429,247 @@ export default function AccountManagementPage() {
                         />
                       </div>
                       <div className="md:col-span-2">
-                        <Label htmlFor="scheduleAvailability">Schedule Availability</Label>
-                        <textarea
-                          id="scheduleAvailability"
-                          value={newAccount.scheduleAvailability}
-                          onChange={(e) => handleInputChange("scheduleAvailability", e.target.value)}
-                          placeholder="Optional notes or upcoming schedule blocks"
-                          className="mt-1 min-h-[90px] w-full rounded-md border border-[hsl(258_22%_90%)] px-3 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)]"
-                        />
-                        <p className="mt-1 text-xs text-gray-500">Optional placeholder – integrate with calendar in the future.</p>
+                        <Label htmlFor="scheduleAvailability">Schedule Availability <span className="text-red-500">*</span></Label>
+                        
+                        {/* Day Selector */}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
+                            <button
+                              key={day}
+                              type="button"
+                              onClick={() => toggleDay(day)}
+                              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer active:scale-95 ${
+                                selectedDays.includes(day)
+                                  ? 'bg-[hsl(258_46%_25%)] text-white hover:bg-[hsl(258_46%_22%)]'
+                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
+                              }`}
+                            >
+                              {day.slice(0, 3)}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Time Pickers for Selected Days */}
+                        {selectedDays.length > 0 && (
+                          <div className="mt-4 space-y-3">
+                            {sortDaysInWeekOrder(selectedDays).map((day) => {
+                              const dayKey = day.toLowerCase() as keyof WeekSchedule;
+                              const schedule = weekSchedule[dayKey];
+                              
+                              const startTime = parseTime(schedule?.startTime || '09:00 AM');
+                              const endTime = parseTime(schedule?.endTime || '05:00 PM');
+
+                              return (
+                                <div key={day} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                                  <h4 className="text-sm font-semibold text-[hsl(258_46%_25%)] mb-3">{day}</h4>
+                                  
+                                  {/* Single row layout packed to the left with even spacing */}
+                                  <div className="flex items-center gap-10">
+                                    {/* Start Time Section */}
+                                    <div className="flex items-center gap-2">
+                                      <div className="flex items-center gap-1.5">
+                                        {/* Hour - Custom Dropdown */}
+                                        <div className="relative custom-dropdown">
+                                          <button
+                                            type="button"
+                                            onClick={() => setOpenDropdown(openDropdown === `${day}-start-hour` ? null : `${day}-start-hour`)}
+                                            className="w-16 h-9 px-2 rounded-lg border-2 border-[hsl(258_22%_90%)] bg-white text-sm text-[hsl(258_46%_25%)] font-medium hover:border-[hsl(258_46%_25%/0.5)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.2)] focus:border-[hsl(258_46%_25%)] transition-all cursor-pointer text-center active:scale-95"
+                                          >
+                                            {startTime.hour}
+                                          </button>
+                                          {openDropdown === `${day}-start-hour` && (
+                                            <div className="absolute z-50 mt-1 w-16 max-h-48 overflow-y-auto bg-white border-2 border-[hsl(258_46%_25%/0.2)] rounded-lg shadow-lg">
+                                              {Array.from({ length: 12 }, (_, i) => i + 1).map((hour) => {
+                                                const hourStr = hour.toString().padStart(2, '0');
+                                                return (
+                                                  <button
+                                                    key={hour}
+                                                    type="button"
+                                                    onClick={() => {
+                                                      updateTimeComponent(day, 'startTime', 'hour', hourStr);
+                                                      setOpenDropdown(null);
+                                                    }}
+                                                    className={`w-full px-2 py-1.5 text-sm text-center transition-all hover:bg-[hsl(258_46%_95%)] ${
+                                                      startTime.hour === hourStr
+                                                        ? 'bg-[hsl(258_46%_25%)] text-white font-semibold'
+                                                        : 'text-[hsl(258_46%_25%)]'
+                                                    }`}
+                                                  >
+                                                    {hourStr}
+                                                  </button>
+                                                );
+                                              })}
+                                            </div>
+                                          )}
+                                        </div>
+                                        
+                                        <span className="text-gray-400 font-semibold">:</span>
+                                        
+                                        {/* Minute - Custom Dropdown */}
+                                        <div className="relative custom-dropdown">
+                                          <button
+                                            type="button"
+                                            onClick={() => setOpenDropdown(openDropdown === `${day}-start-minute` ? null : `${day}-start-minute`)}
+                                            className="w-16 h-9 px-2 rounded-lg border-2 border-[hsl(258_22%_90%)] bg-white text-sm text-[hsl(258_46%_25%)] font-medium hover:border-[hsl(258_46%_25%/0.5)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.2)] focus:border-[hsl(258_46%_25%)] transition-all cursor-pointer text-center active:scale-95"
+                                          >
+                                            {startTime.minute}
+                                          </button>
+                                          {openDropdown === `${day}-start-minute` && (
+                                            <div className="absolute z-50 mt-1 w-16 bg-white border-2 border-[hsl(258_46%_25%/0.2)] rounded-lg shadow-lg">
+                                              {['00', '15', '30', '45'].map((minute) => (
+                                                <button
+                                                  key={minute}
+                                                  type="button"
+                                                  onClick={() => {
+                                                    updateTimeComponent(day, 'startTime', 'minute', minute);
+                                                    setOpenDropdown(null);
+                                                  }}
+                                                  className={`w-full px-2 py-1.5 text-sm text-center transition-all hover:bg-[hsl(258_46%_95%)] ${
+                                                    startTime.minute === minute
+                                                      ? 'bg-[hsl(258_46%_25%)] text-white font-semibold'
+                                                      : 'text-[hsl(258_46%_25%)]'
+                                                  }`}
+                                                >
+                                                  {minute}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                        
+                                        {/* AM/PM - Toggle Button */}
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const newPeriod = startTime.period === 'AM' ? 'PM' : 'AM';
+                                            updateTimeComponent(day, 'startTime', 'period', newPeriod);
+                                          }}
+                                          className="w-16 h-9 px-2 rounded-lg border-2 border-[hsl(258_22%_90%)] bg-white text-sm text-[hsl(258_46%_25%)] font-semibold hover:border-[hsl(258_46%_25%/0.5)] hover:bg-[hsl(258_46%_95%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.2)] focus:border-[hsl(258_46%_25%)] transition-all cursor-pointer text-center active:scale-95"
+                                        >
+                                          {startTime.period}
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    {/* "to" separator */}
+                                    <span className="text-sm text-gray-500 font-medium">to</span>
+
+                                    {/* End Time Section */}
+                                    <div className="flex items-center gap-2">
+                                      <div className="flex items-center gap-1.5">
+                                        {/* Hour - Custom Dropdown */}
+                                        <div className="relative custom-dropdown">
+                                          <button
+                                            type="button"
+                                            onClick={() => setOpenDropdown(openDropdown === `${day}-end-hour` ? null : `${day}-end-hour`)}
+                                            className="w-16 h-9 px-2 rounded-lg border-2 border-[hsl(258_22%_90%)] bg-white text-sm text-[hsl(258_46%_25%)] font-medium hover:border-[hsl(258_46%_25%/0.5)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.2)] focus:border-[hsl(258_46%_25%)] transition-all cursor-pointer text-center active:scale-95"
+                                          >
+                                            {endTime.hour}
+                                          </button>
+                                          {openDropdown === `${day}-end-hour` && (
+                                            <div className="absolute z-50 mt-1 w-16 max-h-48 overflow-y-auto bg-white border-2 border-[hsl(258_46%_25%/0.2)] rounded-lg shadow-lg">
+                                              {Array.from({ length: 12 }, (_, i) => i + 1).map((hour) => {
+                                                const hourStr = hour.toString().padStart(2, '0');
+                                                return (
+                                                  <button
+                                                    key={hour}
+                                                    type="button"
+                                                    onClick={() => {
+                                                      updateTimeComponent(day, 'endTime', 'hour', hourStr);
+                                                      setOpenDropdown(null);
+                                                    }}
+                                                    className={`w-full px-2 py-1.5 text-sm text-center transition-all hover:bg-[hsl(258_46%_95%)] ${
+                                                      endTime.hour === hourStr
+                                                        ? 'bg-[hsl(258_46%_25%)] text-white font-semibold'
+                                                        : 'text-[hsl(258_46%_25%)]'
+                                                    }`}
+                                                  >
+                                                    {hourStr}
+                                                  </button>
+                                                );
+                                              })}
+                                            </div>
+                                          )}
+                                        </div>
+                                        
+                                        <span className="text-gray-400 font-semibold">:</span>
+                                        
+                                        {/* Minute - Custom Dropdown */}
+                                        <div className="relative custom-dropdown">
+                                          <button
+                                            type="button"
+                                            onClick={() => setOpenDropdown(openDropdown === `${day}-end-minute` ? null : `${day}-end-minute`)}
+                                            className="w-16 h-9 px-2 rounded-lg border-2 border-[hsl(258_22%_90%)] bg-white text-sm text-[hsl(258_46%_25%)] font-medium hover:border-[hsl(258_46%_25%/0.5)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.2)] focus:border-[hsl(258_46%_25%)] transition-all cursor-pointer text-center active:scale-95"
+                                          >
+                                            {endTime.minute}
+                                          </button>
+                                          {openDropdown === `${day}-end-minute` && (
+                                            <div className="absolute z-50 mt-1 w-16 bg-white border-2 border-[hsl(258_46%_25%/0.2)] rounded-lg shadow-lg">
+                                              {['00', '15', '30', '45'].map((minute) => (
+                                                <button
+                                                  key={minute}
+                                                  type="button"
+                                                  onClick={() => {
+                                                    updateTimeComponent(day, 'endTime', 'minute', minute);
+                                                    setOpenDropdown(null);
+                                                  }}
+                                                  className={`w-full px-2 py-1.5 text-sm text-center transition-all hover:bg-[hsl(258_46%_95%)] ${
+                                                    endTime.minute === minute
+                                                      ? 'bg-[hsl(258_46%_25%)] text-white font-semibold'
+                                                      : 'text-[hsl(258_46%_25%)]'
+                                                  }`}
+                                                >
+                                                  {minute}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                        
+                                        {/* AM/PM - Toggle Button */}
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const newPeriod = endTime.period === 'AM' ? 'PM' : 'AM';
+                                            updateTimeComponent(day, 'endTime', 'period', newPeriod);
+                                          }}
+                                          className="w-16 h-9 px-2 rounded-lg border-2 border-[hsl(258_22%_90%)] bg-white text-sm text-[hsl(258_46%_25%)] font-semibold hover:border-[hsl(258_46%_25%/0.5)] hover:bg-[hsl(258_46%_95%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.2)] focus:border-[hsl(258_46%_25%)] transition-all cursor-pointer text-center active:scale-95"
+                                        >
+                                          {endTime.period}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  
+                                  {/* Individual Error Message for this day */}
+                                  {scheduleErrors[day] && (
+                                    <p className="mt-2 text-xs text-red-600 flex items-center gap-1">
+                                      <AlertCircle className="h-3 w-3" />
+                                      {scheduleErrors[day]}
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Helper Text */}
+                        <p className="mt-2 text-xs text-gray-500">
+                          {selectedDays.length === 0 
+                            ? 'Select days to set working hours for this dentist' 
+                            : `${selectedDays.length} day${selectedDays.length > 1 ? 's' : ''} selected`}
+                        </p>
+                        
+                        {/* Error Message Card */}
+                        {scheduleError && (
+                          <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                            <p className="text-sm text-red-700 flex items-center gap-2">
+                              <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                              <span>{scheduleError}</span>
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1300,7 +1757,7 @@ export default function AccountManagementPage() {
                   )}
                 </section>
 
-                <div className="flex justify-end pt-2">
+                <div className="flex justify-end pt-2 pb-4">
                   <Button
                     type="submit"
                     disabled={isSaving}
@@ -1396,7 +1853,7 @@ export default function AccountManagementPage() {
           </Card>
 
           {/* Users Table */}
-          <Card className="bg-white">
+          <Card className="bg-white mb-10">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
@@ -1587,7 +2044,7 @@ export default function AccountManagementPage() {
                 </div>
 
                 {/* Pagination Controls - Bottom */}
-                <div className="mt-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-4">
+                <div className="mt-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-4 pb-4">
                   <div className="text-sm font-medium text-[hsl(258_46%_25%)]">
                     Showing <span className="font-semibold">{startIndex + 1}</span> to <span className="font-semibold">{Math.min(endIndex, existingUsers.length)}</span> of <span className="font-semibold">{existingUsers.length}</span> users
                   </div>
@@ -2135,10 +2592,24 @@ export default function AccountManagementPage() {
                               <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.clinicAssignment}</p>
                             </div>
                           )}
-                          {newAccount.scheduleAvailability && (
-                            <div>
-                              <p className="text-xs text-[hsl(258_22%_50%)]">Schedule Availability</p>
-                              <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.scheduleAvailability || 'To be configured'}</p>
+                          {selectedDays.length > 0 && (
+                            <div className="col-span-2">
+                              <p className="text-xs text-[hsl(258_22%_50%)] mb-2">Schedule Availability</p>
+                              <div className="space-y-1">
+                                {selectedDays.map((day) => {
+                                  const dayKey = day.toLowerCase() as keyof WeekSchedule;
+                                  const schedule = weekSchedule[dayKey];
+                                  if (!schedule) return null;
+                                  return (
+                                    <div key={day} className="flex items-center gap-2 text-sm">
+                                      <span className="font-medium text-[hsl(258_46%_25%)] min-w-[100px]">{day}:</span>
+                                      <span className="text-[hsl(258_22%_50%)]">
+                                        {schedule.startTime} - {schedule.endTime}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
                           )}
                         </>
