@@ -189,7 +189,38 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 7. Return success
+    // Debug: Log what dbResult contains
+    console.log('📋 Database function result:', dbResult);
+    console.log('📋 Result type:', typeof dbResult);
+
+    // Extract user_id from the JSON response
+    const userId = dbResult?.user_id;
+    console.log('🆔 Extracted user_id:', userId);
+
+    // 7. If dentist, fetch the doctor_id to return
+    let doctorId = null;
+    if (role === 'dentist' && userId) {
+      console.log('🔍 Fetching doctor_id for user_id:', userId);
+      
+      const { data: doctorData, error: doctorError } = await supabaseAdmin
+        .from('doctors')
+        .select('doctor_id')
+        .eq('user_id', userId)
+        .single();
+      
+      console.log('🔍 Doctor query result:', { doctorData, doctorError });
+      
+      if (!doctorError && doctorData) {
+        doctorId = doctorData.doctor_id;
+        console.log('✅ Found doctor_id:', doctorId);
+      } else {
+        console.error('❌ Failed to fetch doctor_id:', doctorError);
+      }
+    }
+
+    console.log('📤 Returning doctorId:', doctorId);
+
+    // 8. Return success
     return NextResponse.json({
       success: true,
       message: `${role} account created successfully`,
@@ -198,6 +229,7 @@ export async function POST(request: NextRequest) {
         email: authData.user.email,
         role: role,
       },
+      doctorId: doctorId, // Include doctor_id if dentist role
     });
   } catch (error: any) {
     console.error('Unexpected error in create-user API:', error);

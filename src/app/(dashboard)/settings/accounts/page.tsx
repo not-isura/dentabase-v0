@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { createClient } from "@/lib/supabase/client";
 
 type UserRole = "admin" | "dentist" | "dental_staff" | "patient";
 type AccountStatus = "active" | "inactive";
@@ -736,6 +737,48 @@ export default function AccountManagementPage() {
     return scheduleLines.join('\n');
   };
 
+  // Helper function: Convert 12-hour time to 24-hour format for database
+  const convertTo24Hour = (time12h: string): string => {
+    const [timePart, period] = time12h.split(' ');
+    let [hours, minutes] = timePart.split(':').map(Number);
+    
+    if (period === 'PM' && hours !== 12) hours += 12;
+    if (period === 'AM' && hours === 12) hours = 0;
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
+  };
+
+  // Helper function: Convert 24-hour time to 12-hour format for UI
+  const convertTo12Hour = (time24h: string): string => {
+    const [hoursStr, minutesStr] = time24h.split(':');
+    let hours = parseInt(hoursStr, 10);
+    const minutes = minutesStr;
+    
+    const period = hours >= 12 ? 'PM' : 'AM';
+    if (hours > 12) hours -= 12;
+    if (hours === 0) hours = 12;
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes} ${period}`;
+  };
+
+  // Helper function: Format schedule for database insertion
+  const formatScheduleForDB = (doctorId: string) => {
+    const availabilityRecords = [];
+    
+    for (const [day, schedule] of Object.entries(weekSchedule)) {
+      if (schedule) {
+        availabilityRecords.push({
+          doctor_id: doctorId,
+          day: day, // already lowercase (monday, tuesday, etc.)
+          start_time: convertTo24Hour(schedule.startTime),
+          end_time: convertTo24Hour(schedule.endTime)
+        });
+      }
+    }
+    
+    return availabilityRecords;
+  };
+
   const handleInputChange = (field: keyof NewAccount, value: string) => {
     // Handle name fields with auto-capitalization and validation
     if (field === 'firstName' || field === 'middleName' || field === 'lastName' || field === 'emergencyContactName') {
@@ -957,13 +1000,83 @@ export default function AccountManagementPage() {
         throw new Error(data.error || 'Failed to create account');
       }
 
+      // Debug: Log API response
+      console.log('✅ API Response:', data);
+      console.log('📋 Account role:', newAccount.role);
+      console.log('📅 Selected days:', selectedDays);
+      console.log('🔑 Doctor ID from API:', data.doctorId);
+
+      // If dentist account with schedule, save availability to database
+      if (newAccount.role === 'dentist' && selectedDays.length > 0 && data.doctorId) {
+        console.log('🚀 Attempting to save schedule to database...');
+        
+        try {
+          const supabase = createClient();
+          
+          // Format schedule for database
+          const scheduleRecords = formatScheduleForDB(data.doctorId);
+          console.log('📝 Formatted schedule records:', JSON.stringify(scheduleRecords, null, 2));
+          
+          // Insert all availability records
+          const { data: insertData, error: scheduleError } = await supabase
+            .from('doc_availability')
+            .insert(scheduleRecords)
+            .select();
+
+          console.log('💾 Insert result:', { insertData, scheduleError });
+
+          if (scheduleError) {
+            console.error('❌ Error saving schedule:', scheduleError);
+            console.error('Error details:', {
+              message: scheduleError.message,
+              code: scheduleError.code,
+              details: scheduleError.details,
+              hint: scheduleError.hint
+            });
+            showNotification(
+              'info', 
+              'Partial Success', 
+              `${newAccount.firstName} ${newAccount.lastName}'s account was created, but schedule could not be saved.`,
+              ['You can update the schedule later from the Manage Users tab.', `Error: ${scheduleError.message}`]
+            );
+            return; // Exit early, don't show success notification again
+          }
+          
+          console.log('✅ Schedule saved successfully!');
+        } catch (scheduleErr: any) {
+          console.error('❌ Exception while handling schedule:', scheduleErr);
+          console.error('Exception details:', {
+            message: scheduleErr.message,
+            stack: scheduleErr.stack
+          });
+          showNotification(
+            'info',
+            'Partial Success',
+            `${newAccount.firstName} ${newAccount.lastName}'s account was created, but schedule could not be saved.`,
+            ['You can update the schedule later from the Manage Users tab.', `Error: ${scheduleErr.message}`]
+          );
+          return; // Exit early
+        }
+      } else {
+        console.log('⚠️ Skipping schedule save. Conditions:', {
+          isDentist: newAccount.role === 'dentist',
+          hasDays: selectedDays.length > 0,
+          hasDoctorId: !!data.doctorId,
+          selectedDaysCount: selectedDays.length,
+          doctorIdValue: data.doctorId
+        });
+      }
+
       // Success! Show notification
       showNotification(
         'success',
         'Account Created Successfully',
         `${newAccount.firstName} ${newAccount.lastName} has been added to the system.`,
         [
-          `Email: ${newAccount.email}`
+          `Email: ${newAccount.email}`,
+          ...(newAccount.role === 'dentist' && selectedDays.length > 0 
+            ? [`Schedule: ${selectedDays.length} day(s) configured`] 
+            : [])
         ]
       );
 
