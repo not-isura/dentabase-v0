@@ -103,10 +103,10 @@ export default function LoginPage() {
           router.push("/dashboard");
           break;
         case "dentist":
-          router.push("/appointments/admin");
+          router.push("/dashboard");
           break;
         case "dental_staff":
-          router.push("/appointments");
+          router.push("/dashboard");
           break;
         case "admin":
           router.push("/settings");

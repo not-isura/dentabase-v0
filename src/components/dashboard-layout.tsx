@@ -1,34 +1,19 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { 
-  Calendar, 
-  Users, 
-  FileText, 
-  Settings, 
-  Home
-} from "lucide-react";
-
 import { Button } from "@/components/ui/button";
 import { Navbar, NavbarRight, UserProfile } from "@/components/ui/navbar";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { AuthLoadingSpinner } from "@/components/auth-loading-spinner";
+import { ROUTE_DEFINITIONS, findRouteByPath } from "@/config/routes";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
 }
-
-const navItems = [
-  { href: "/dashboard", label: "Overview", icon: Home },
-  { href: "/appointments", label: "Appointments", icon: Calendar },
-  { href: "/appointments/admin", label: "Admin Appointments", icon: Calendar },
-  { href: "/patients", label: "Patients", icon: Users },
-  { href: "/records", label: "Records", icon: FileText },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname();
@@ -37,6 +22,54 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   
   // 🎯 Get real user data from Auth Context
   const { displayUser, isLoading: isLoadingUser, setIsLoggingOut: setAuthLoggingOut } = useAuth();
+
+  const [isAuthorizing, setIsAuthorizing] = useState(true);
+
+  const userRole = displayUser?.role ?? null;
+
+  const sidebarItems = useMemo(() => {
+    if (!userRole) return [];
+    return ROUTE_DEFINITIONS.filter((route) => route.showInSidebar && route.allowedRoles.includes(userRole));
+  }, [userRole]);
+
+  const normalizePath = (path: string) => {
+    if (!path) return "/";
+    if (path === "/") return "/";
+    return path.endsWith("/") ? path.slice(0, -1) : path;
+  };
+
+  const isRouteActive = useMemo(() => {
+    const currentPath = normalizePath(pathname);
+    return (routeHref: string, exact = true) => {
+      const routePath = normalizePath(routeHref);
+      if (exact === false) {
+        return currentPath === routePath || currentPath.startsWith(`${routePath}/`);
+      }
+      return currentPath === routePath;
+    };
+  }, [pathname]);
+
+  useEffect(() => {
+    setIsAuthorizing(true);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (isLoadingUser) return;
+
+    if (!displayUser) {
+      setIsAuthorizing(false);
+      return;
+    }
+
+    const routeDefinition = findRouteByPath(pathname);
+
+    if (routeDefinition && !routeDefinition.allowedRoles.includes(displayUser.role)) {
+      router.replace("/404");
+      return;
+    }
+
+    setIsAuthorizing(false);
+  }, [displayUser, isLoadingUser, pathname, router]);
 
   const handleLogout = async () => {
     if (isLoggingOut) return; // Prevent double-click
@@ -68,6 +101,10 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     }
   };
 
+  if (isLoadingUser || isAuthorizing || !displayUser) {
+    return <AuthLoadingSpinner />;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[hsl(258_46%_25%/0.02)] via-[hsl(330_100%_99%)] to-[hsl(36_60%_78%/0.02)]">
       <div className="flex">
@@ -95,23 +132,18 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
               {/* Navigation */}
               <nav className="space-y-1">
-                {navItems.map((item) => {
-                  const isAppointmentsTab = item.href === "/appointments";
-                  const isSettingsTab = item.href === "/settings";
-                  const isActive =
-                    pathname === item.href ||
-                    (isAppointmentsTab && pathname.startsWith("/appointments") && !pathname.startsWith("/appointments/admin")) ||
-                    (isSettingsTab && pathname.startsWith("/settings"));
+                {sidebarItems.map((item) => {
+                  const active = isRouteActive(item.href, item.exact !== false);
 
                   return (
                     <div key={item.href} className="mb-2">
                       <Link href={item.href} className="cursor-pointer group relative">
                       <Button
-                        variant={isActive ? "default" : "ghost"}
+                        variant={active ? "default" : "ghost"}
                         className={`w-full font-semibold cursor-pointer transition-all duration-200
                           md:justify-center sm:justify-center lg:justify-start xl:justify-start
                           md:px-3 sm:px-3 lg:px-4 xl:px-4
-                          ${isActive 
+                          ${active 
                             ? "bg-[hsl(258_46%_25%)] text-white" 
                             : "text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.1)]"
                         }`}
