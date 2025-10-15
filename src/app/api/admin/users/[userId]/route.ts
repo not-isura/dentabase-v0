@@ -140,8 +140,7 @@ export async function PATCH(
       // Role-specific fields
       specialization,
       licenseNumber,
-      clinicAssignment,
-      scheduleAvailability,
+  clinicAssignment,
       designation,
       assignedDoctor,
       address,
@@ -173,42 +172,168 @@ export async function PATCH(
     }
 
     // Update role-specific tables - RLS will block if not admin
-    if (role === 'dentist' && (specialization || licenseNumber || clinicAssignment || scheduleAvailability)) {
-      await supabase
+    const hasDentistField =
+      Object.prototype.hasOwnProperty.call(body, 'specialization') ||
+      Object.prototype.hasOwnProperty.call(body, 'licenseNumber') ||
+      Object.prototype.hasOwnProperty.call(body, 'clinicAssignment');
+
+    if (role === 'dentist' && hasDentistField) {
+      const doctorUpdates: Record<string, string | null | undefined> = {};
+      if (Object.prototype.hasOwnProperty.call(body, 'specialization')) {
+        doctorUpdates.specialization = specialization ?? null;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'licenseNumber')) {
+        doctorUpdates.license_number = licenseNumber ?? null;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'clinicAssignment')) {
+        doctorUpdates.room_number = clinicAssignment ?? null;
+      }
+
+      if (Object.keys(doctorUpdates).length > 0) {
+        const { error: doctorUpdateError } = await supabase
+          .from('doctors')
+          .update(doctorUpdates)
+          .eq('user_id', userId);
+
+        if (doctorUpdateError) {
+          console.error('Error updating doctor details:', doctorUpdateError);
+          return NextResponse.json(
+            { error: 'Failed to update doctor information' },
+            { status: 500 }
+          );
+        }
+      }
+    }
+
+    const hasStaffField =
+      Object.prototype.hasOwnProperty.call(body, 'designation') ||
+      Object.prototype.hasOwnProperty.call(body, 'assignedDoctor');
+
+    if (role === 'dental_staff' && hasStaffField) {
+      const staffUpdates: Record<string, string | null | undefined> = {};
+      if (Object.prototype.hasOwnProperty.call(body, 'designation')) {
+        staffUpdates.position_title = designation ?? null;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'assignedDoctor')) {
+        staffUpdates.doctor_id = assignedDoctor ?? null;
+      }
+
+      if (Object.keys(staffUpdates).length > 0) {
+        const { error: staffUpdateError } = await supabase
+          .from('staff')
+          .update(staffUpdates)
+          .eq('user_id', userId);
+
+        if (staffUpdateError) {
+          console.error('Error updating staff details:', staffUpdateError);
+          return NextResponse.json(
+            { error: 'Failed to update staff information' },
+            { status: 500 }
+          );
+        }
+      }
+    }
+
+    const hasPatientField =
+      Object.prototype.hasOwnProperty.call(body, 'address') ||
+      Object.prototype.hasOwnProperty.call(body, 'emergencyContactName') ||
+      Object.prototype.hasOwnProperty.call(body, 'emergencyContactNo');
+
+    if (role === 'patient' && hasPatientField) {
+      const patientUpdates: Record<string, string | null | undefined> = {};
+      if (Object.prototype.hasOwnProperty.call(body, 'address')) {
+        patientUpdates.address = address ?? null;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'emergencyContactName')) {
+        patientUpdates.emergency_contact_name = emergencyContactName ?? null;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'emergencyContactNo')) {
+        patientUpdates.emergency_contact_no = emergencyContactNo ?? null;
+      }
+
+      if (Object.keys(patientUpdates).length > 0) {
+        const { error: patientUpdateError } = await supabase
+          .from('patient')
+          .update(patientUpdates)
+          .eq('user_id', userId);
+
+        if (patientUpdateError) {
+          console.error('Error updating patient details:', patientUpdateError);
+          return NextResponse.json(
+            { error: 'Failed to update patient information' },
+            { status: 500 }
+          );
+        }
+      }
+    }
+
+    // Fetch updated user and role-specific data to return to client
+    const { data: updatedUser, error: updatedUserError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (updatedUserError || !updatedUser) {
+      console.error('Error fetching updated user:', updatedUserError);
+      return NextResponse.json(
+        { error: 'Failed to retrieve updated user information' },
+        { status: 500 }
+      );
+    }
+
+    let updatedRoleData: any = null;
+    if (updatedUser.role === 'dentist') {
+      const { data: doctorData, error: doctorFetchError } = await supabase
         .from('doctors')
-        .update({
-          specialization,
-          license_number: licenseNumber,
-          room_number: clinicAssignment, // Map clinicAssignment to room_number
-          schedule_availability: scheduleAvailability
-        })
-        .eq('user_id', userId);
-    }
+        .select('*')
+        .eq('user_id', userId)
+        .single();
 
-    if (role === 'dental_staff' && (designation || assignedDoctor)) {
-      await supabase
+      if (doctorFetchError) {
+        console.error('Error fetching updated doctor data:', doctorFetchError);
+      } else if (doctorData) {
+        updatedRoleData = {
+          ...doctorData,
+          clinic_assignment: doctorData.room_number,
+        };
+      }
+    } else if (updatedUser.role === 'dental_staff') {
+      const { data: staffData, error: staffFetchError } = await supabase
         .from('staff')
-        .update({
-          position_title: designation, // Map designation to position_title
-          doctor_id: assignedDoctor    // Map assignedDoctor to doctor_id
-        })
-        .eq('user_id', userId);
-    }
+        .select('*')
+        .eq('user_id', userId)
+        .single();
 
-    if (role === 'patient' && (address || emergencyContactName || emergencyContactNo)) {
-      await supabase
+      if (staffFetchError) {
+        console.error('Error fetching updated staff data:', staffFetchError);
+      } else if (staffData) {
+        updatedRoleData = {
+          ...staffData,
+          designation: staffData.position_title,
+          assigned_doctor: staffData.doctor_id,
+        };
+      }
+    } else if (updatedUser.role === 'patient') {
+      const { data: patientData, error: patientFetchError } = await supabase
         .from('patient')
-        .update({
-          address,
-          emergency_contact_name: emergencyContactName,
-          emergency_contact_no: emergencyContactNo
-        })
-        .eq('user_id', userId);
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      if (patientFetchError) {
+        console.error('Error fetching updated patient data:', patientFetchError);
+      } else {
+        updatedRoleData = patientData;
+      }
     }
 
     return NextResponse.json({ 
       message: 'User updated successfully',
-      userId 
+      user: {
+        ...updatedUser,
+        roleData: updatedRoleData,
+      },
     });
   } catch (error: any) {
     console.error('Error updating user:', error);
