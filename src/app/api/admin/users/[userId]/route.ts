@@ -58,7 +58,15 @@ export async function GET(
         .select('*')
         .eq('user_id', userId)
         .single();
-      roleData = data;
+      // Map room_number to clinicAssignment for frontend compatibility
+      if (data) {
+        roleData = {
+          ...data,
+          clinic_assignment: data.room_number
+        };
+      } else {
+        roleData = data;
+      }
     } else if (targetUser.role === 'dental_staff') {
       const { data } = await supabase
         .from('staff')
@@ -162,7 +170,7 @@ export async function PATCH(
         .update({
           specialization,
           license_number: licenseNumber,
-          clinic_assignment: clinicAssignment,
+          room_number: clinicAssignment, // Map clinicAssignment to room_number
           schedule_availability: scheduleAvailability
         })
         .eq('user_id', userId);

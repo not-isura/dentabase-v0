@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import DoctorSchedule from "@/components/doctor-schedule";
+import EditScheduleModal from "@/components/edit-schedule-modal";
 import { 
   ArrowLeft, 
   ChevronRight,
@@ -48,6 +50,10 @@ export default function SettingsProfilePage() {
   const [address, setAddress] = useState("");
   const [emergencyContactName, setEmergencyContactName] = useState("");
   const [emergencyContactNo, setEmergencyContactNo] = useState("");
+
+  // Edit Schedule Modal state
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0);
 
   // Helper functions for validation
   const capitalizeNames = (name: string): string => {
@@ -208,6 +214,25 @@ export default function SettingsProfilePage() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // Handle schedule modal
+  const handleOpenScheduleModal = () => {
+    setIsScheduleModalOpen(true);
+  };
+
+  const handleCloseScheduleModal = () => {
+    setIsScheduleModalOpen(false);
+  };
+
+  const handleScheduleSaved = () => {
+    // Refresh the schedule component by updating the key
+    setScheduleRefreshKey(prev => prev + 1);
+    setSuccessMessage("Schedule updated successfully!");
+    setTimeout(() => setSuccessMessage(null), 3000);
+    
+    // Scroll to top of page to show success message
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleCancel = () => {
@@ -581,76 +606,110 @@ export default function SettingsProfilePage() {
 
       {/* Non-Patient Users Card - Dentist/Staff Profile */}
       {user.role !== "patient" && user.role !== "admin" && (
-        <Card className="bg-white">
-          <CardHeader>
-            <CardTitle className="flex items-center text-[hsl(258_46%_25%)]">
-              <Shield className="h-5 w-5 mr-2" />
-              {user.role === 'dentist' ? 'Dentist Information' : 'Staff Information'}
-            </CardTitle>
-            <CardDescription className="text-[hsl(258_22%_50%)]">
-              Your professional information (read-only)
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {user.role === 'dentist' && dentistProfile && (
-              <>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-[hsl(258_22%_50%)]">Specialization</Label>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <p className="text-[hsl(258_46%_25%)]">{dentistProfile.specialization || "Not set"}</p>
+        <>
+          <Card className="bg-white">
+            <CardHeader>
+              <CardTitle className="flex items-center text-[hsl(258_46%_25%)]">
+                <Shield className="h-5 w-5 mr-2" />
+                {user.role === 'dentist' ? 'Dentist Information' : 'Staff Information'}
+              </CardTitle>
+              <CardDescription className="text-[hsl(258_22%_50%)]">
+                Your professional information (read-only)
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {user.role === 'dentist' && dentistProfile && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-[hsl(258_22%_50%)]">Specialization</Label>
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <p className="text-[hsl(258_46%_25%)]">{dentistProfile.specialization || "Not set"}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-[hsl(258_22%_50%)]">License Number</Label>
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <p className="text-[hsl(258_46%_25%)]">{dentistProfile.license_number || "Not set"}</p>
+                      </div>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-[hsl(258_22%_50%)]">License Number</Label>
+                    <Label className="text-[hsl(258_22%_50%)]">Room Number</Label>
                     <div className="p-3 bg-gray-50 rounded-lg">
-                      <p className="text-[hsl(258_46%_25%)]">{dentistProfile.license_number || "Not set"}</p>
+                      <p className="text-[hsl(258_46%_25%)]">{dentistProfile.room_number || "Not assigned"}</p>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {user.role === 'dental_staff' && staffProfile && (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-[hsl(258_22%_50%)]">Position</Label>
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <p className="text-[hsl(258_46%_25%)]">{staffProfile.position_title || "Not set"}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[hsl(258_22%_50%)]">Assigned Doctor</Label>
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <p className="text-[hsl(258_46%_25%)]">
+                        {staffProfile.doctors?.users 
+                          ? `Dr. ${staffProfile.doctors.users.first_name} ${staffProfile.doctors.users.middle_name ? staffProfile.doctors.users.middle_name + ' ' : ''}${staffProfile.doctors.users.last_name}`
+                          : "Not assigned"}
+                      </p>
                     </div>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label className="text-[hsl(258_22%_50%)]">Room Number</Label>
-                  <div className="p-3 bg-gray-50 rounded-lg">
-                    <p className="text-[hsl(258_46%_25%)]">{dentistProfile.room_number || "Not assigned"}</p>
-                  </div>
-                </div>
-              </>
-            )}
+              )}
 
-            {user.role === 'dental_staff' && staffProfile && (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-[hsl(258_22%_50%)]">Position</Label>
-                  <div className="p-3 bg-gray-50 rounded-lg">
-                    <p className="text-[hsl(258_46%_25%)]">{staffProfile.position_title || "Not set"}</p>
-                  </div>
+              {!dentistProfile && !staffProfile && (
+                <div className="text-center py-8">
+                  <p className="text-[hsl(258_22%_50%)]">No additional profile information available.</p>
                 </div>
-                <div className="space-y-2">
-                  <Label className="text-[hsl(258_22%_50%)]">Assigned Doctor</Label>
-                  <div className="p-3 bg-gray-50 rounded-lg">
-                    <p className="text-[hsl(258_46%_25%)]">
-                      {staffProfile.doctors?.users 
-                        ? `Dr. ${staffProfile.doctors.users.first_name} ${staffProfile.doctors.users.middle_name ? staffProfile.doctors.users.middle_name + ' ' : ''}${staffProfile.doctors.users.last_name}`
-                        : "Not assigned"}
-                    </p>
-                  </div>
-                </div>
+              )}
+
+              <div className="pt-4 border-t">
+                <p className="text-sm text-[hsl(258_22%_50%)] italic">
+                  Professional information cannot be edited directly. Please contact your administrator for updates.
+                </p>
               </div>
-            )}
+            </CardContent>
+          </Card>
 
-            {!dentistProfile && !staffProfile && (
-              <div className="text-center py-8">
-                <p className="text-[hsl(258_22%_50%)]">No additional profile information available.</p>
-              </div>
-            )}
+          {/* Doctor Schedule Section */}
+          {user.role === 'dentist' && dentistProfile?.doctor_id && (
+            <DoctorSchedule 
+              key={scheduleRefreshKey}
+              doctorId={dentistProfile.doctor_id}
+              title="My Weekly Availability"
+              description="Your availability schedule for patient appointments"
+              showEditButton={true}
+              onEditClick={handleOpenScheduleModal}
+            />
+          )}
 
-            <div className="pt-4 border-t">
-              <p className="text-sm text-[hsl(258_22%_50%)] italic">
-                Professional information cannot be edited directly. Please contact your administrator for updates.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+          {user.role === 'dental_staff' && staffProfile?.doctor_id && (
+            <DoctorSchedule 
+              key={scheduleRefreshKey}
+              doctorId={staffProfile.doctor_id}
+              title="Assigned Doctor's Weekly Availability"
+              description={`Schedule for ${staffProfile.doctors?.users ? `Dr. ${staffProfile.doctors.users.first_name} ${staffProfile.doctors.users.last_name}` : 'your assigned doctor'}`}
+              showEditButton={false}
+            />
+          )}
+        </>
+      )}
+
+      {/* Edit Schedule Modal */}
+      {user.role === 'dentist' && dentistProfile?.doctor_id && (
+        <EditScheduleModal
+          doctorId={dentistProfile.doctor_id}
+          isOpen={isScheduleModalOpen}
+          onClose={handleCloseScheduleModal}
+          onSave={handleScheduleSaved}
+        />
       )}
     </div>
   );

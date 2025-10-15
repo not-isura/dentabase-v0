@@ -195,6 +195,13 @@ export default function AccountManagementPage() {
   // Edit dialog validation states
   const [editPhoneError, setEditPhoneError] = useState('');
   const [editEmergencyPhoneError, setEditEmergencyPhoneError] = useState('');
+  
+  // Schedule availability state for editing dentist schedules
+  const [doctorSchedule, setDoctorSchedule] = useState<any[]>([]);
+  const [isLoadingSchedule, setIsLoadingSchedule] = useState(false);
+  const [editSelectedDays, setEditSelectedDays] = useState<string[]>([]);
+  const [editWeekSchedule, setEditWeekSchedule] = useState<WeekSchedule>({});
+  const [editScheduleErrors, setEditScheduleErrors] = useState<Record<string, string>>({});
 
   // Schedule availability state
   type DaySchedule = { startTime: string; endTime: string };
@@ -257,6 +264,16 @@ export default function AccountManagementPage() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+  
+  // Reset schedule states when dialog closes or user changes
+  useEffect(() => {
+    if (!showEditDialog) {
+      setDoctorSchedule([]);
+      setEditSelectedDays([]);
+      setEditWeekSchedule({});
+      setEditScheduleErrors({});
+    }
+  }, [showEditDialog]);
 
   // Calculate pagination
   const totalPages = Math.ceil(existingUsers.length / ITEMS_PER_PAGE);
@@ -370,6 +387,11 @@ export default function AccountManagementPage() {
           emergencyContactName: roleData.emergency_contact_name || '',
           emergencyContactNo: roleData.emergency_contact_no || ''
         });
+        
+        // If user is a dentist, fetch their schedule
+        if (user.role === 'dentist' && roleData.doctor_id) {
+          await fetchDoctorSchedule(roleData.doctor_id);
+        }
       } else {
         setShowEditDialog(false); // Close modal on error
         showNotification('error', 'Failed to Load User', data.error || 'Could not fetch user details');
@@ -377,6 +399,48 @@ export default function AccountManagementPage() {
     } catch (error: any) {
       setShowEditDialog(false); // Close modal on error
       showNotification('error', 'Network Error', 'Failed to connect to server');
+    }
+  };
+  
+  // Fetch doctor's schedule from doc_availability table
+  const fetchDoctorSchedule = async (doctorId: string) => {
+    setIsLoadingSchedule(true);
+    try {
+      const supabase = createClient();
+      
+      const { data, error: fetchError } = await supabase
+        .from('doc_availability')
+        .select('*')
+        .eq('doctor_id', doctorId)
+        .order('day', { ascending: true });
+
+      if (fetchError) {
+        console.error('Error fetching schedule:', fetchError);
+      } else if (data && data.length > 0) {
+        setDoctorSchedule(data);
+        
+        // Initialize edit states from fetched schedule
+        const enabledDays: string[] = [];
+        const weekSched: WeekSchedule = {};
+        
+        data.forEach((day: any) => {
+          const dayName = day.day.charAt(0).toUpperCase() + day.day.slice(1);
+          if (day.is_enabled) {
+            enabledDays.push(dayName);
+          }
+          weekSched[day.day.toLowerCase() as keyof WeekSchedule] = {
+            startTime: convertTo12Hour(day.start_time),
+            endTime: convertTo12Hour(day.end_time)
+          };
+        });
+        
+        setEditSelectedDays(enabledDays);
+        setEditWeekSchedule(weekSched);
+      }
+    } catch (err: any) {
+      console.error('Unexpected error fetching schedule:', err);
+    } finally {
+      setIsLoadingSchedule(false);
     }
   };
 
@@ -393,8 +457,15 @@ export default function AccountManagementPage() {
 
     // Validate role-specific required fields
     if (selectedUser.role === 'dentist') {
-      if (!selectedUser.specialization || !selectedUser.licenseNumber) {
-        showNotification('error', 'Missing Required Fields', 'Please fill in Specialization and License Number for dentist.');
+      if (!selectedUser.specialization || !selectedUser.licenseNumber || !selectedUser.clinicAssignment) {
+        showNotification('error', 'Missing Required Fields', 'Please fill in Specialization, License Number, and Clinic Room for dentist.');
+        return;
+      }
+      
+      // Check for any schedule errors
+      const errorDays = Object.keys(editScheduleErrors);
+      if (errorDays.length > 0) {
+        showNotification('error', 'Schedule Validation Error', 'Please fix the time range errors in the selected days.');
         return;
       }
     }
@@ -424,6 +495,22 @@ export default function AccountManagementPage() {
       const data = await response.json();
 
       if (response.ok) {
+        // If dentist, save schedule changes
+        if (selectedUser.role === 'dentist' && data.user?.roleData?.doctor_id) {
+          const scheduleSuccess = await saveScheduleChanges(data.user.roleData.doctor_id);
+          if (!scheduleSuccess) {
+            showNotification('info', 'Partial Update', 'User information updated, but schedule changes could not be saved.');
+            setShowEditDialog(false);
+            setSelectedUser(null);
+            setIsViewMode(true);
+            setEditPhoneError('');
+            setEditEmergencyPhoneError('');
+            setEditScheduleErrors({});
+            fetchUsers();
+            return;
+          }
+        }
+        
         showNotification(
           'success',
           'User Updated Successfully',
@@ -434,6 +521,7 @@ export default function AccountManagementPage() {
         setIsViewMode(true); // Reset view mode
         setEditPhoneError(''); // Clear error states
         setEditEmergencyPhoneError('');
+        setEditScheduleErrors({});
         fetchUsers(); // Refresh the list
       } else {
         showNotification('error', 'Failed to Update User', data.error || 'Could not update user');
@@ -588,6 +676,119 @@ export default function AccountManagementPage() {
   // Helper function: Build time string from components
   const buildTimeString = (hour: string, minute: string, period: string): string => {
     return `${hour.padStart(2, '0')}:${minute} ${period}`;
+  };
+
+  // Helper function: Toggle day selection (for edit mode)
+  const toggleEditDay = (day: string) => {
+    if (editSelectedDays.includes(day)) {
+      // Remove day
+      setEditSelectedDays(prev => prev.filter(d => d !== day));
+      // Remove error for that day
+      setEditScheduleErrors(prev => {
+        const updated = { ...prev };
+        delete updated[day];
+        return updated;
+      });
+    } else {
+      // Add day
+      setEditSelectedDays(prev => [...prev, day]);
+    }
+  };
+
+  // Helper function: Update time component for edit mode
+  const updateEditTimeComponent = (
+    day: string, 
+    field: 'startTime' | 'endTime', 
+    component: 'hour' | 'minute' | 'period', 
+    value: string
+  ) => {
+    // Clear error for this specific day
+    setEditScheduleErrors(prev => {
+      const updated = { ...prev };
+      delete updated[day];
+      return updated;
+    });
+    
+    setEditWeekSchedule(prev => {
+      const dayKey = day.toLowerCase() as keyof WeekSchedule;
+      const currentSchedule = prev[dayKey] || { startTime: '09:00 AM', endTime: '05:00 PM' };
+      
+      // Parse current time
+      const currentTime = parseTime(currentSchedule[field]);
+      
+      // Update the specific component
+      const updatedTime = {
+        hour: component === 'hour' ? value : currentTime.hour,
+        minute: component === 'minute' ? value : currentTime.minute,
+        period: component === 'period' ? value : currentTime.period,
+      };
+      
+      // Build new time string
+      const newTimeString = buildTimeString(updatedTime.hour, updatedTime.minute, updatedTime.period);
+      
+      const updated = {
+        ...prev,
+        [dayKey]: {
+          ...currentSchedule,
+          [field]: newTimeString
+        }
+      };
+
+      // Validate that end time is after start time
+      const schedule = updated[dayKey]!;
+      if (!isValidTimeRange(schedule.startTime, schedule.endTime)) {
+        // Set error for this specific day
+        setEditScheduleErrors(prevErrors => ({
+          ...prevErrors,
+          [day]: 'End time must be later than start time'
+        }));
+      }
+
+      return updated;
+    });
+  };
+
+  // Helper function: Save updated schedule to database
+  const saveScheduleChanges = async (doctorId: string) => {
+    const allDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+    const updatedRecords = [];
+    
+    for (const day of allDays) {
+      const schedule = editWeekSchedule[day as keyof WeekSchedule];
+      const isEnabled = editSelectedDays.some(d => d.toLowerCase() === day);
+      
+      updatedRecords.push({
+        doctor_id: doctorId,
+        day: day,
+        start_time: schedule?.startTime ? convertTo24Hour(schedule.startTime) : '09:00:00',
+        end_time: schedule?.endTime ? convertTo24Hour(schedule.endTime) : '17:00:00',
+        is_enabled: isEnabled
+      });
+    }
+    
+    try {
+      const supabase = createClient();
+      
+      // Delete existing schedule
+      await supabase
+        .from('doc_availability')
+        .delete()
+        .eq('doctor_id', doctorId);
+      
+      // Insert updated schedule
+      const { error: insertError } = await supabase
+        .from('doc_availability')
+        .insert(updatedRecords);
+      
+      if (insertError) {
+        throw insertError;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Error saving schedule:', error);
+      return false;
+    }
   };
 
   // Helper function: Toggle day selection
@@ -761,19 +962,22 @@ export default function AccountManagementPage() {
     return `${hours.toString().padStart(2, '0')}:${minutes} ${period}`;
   };
 
-  // Helper function: Format schedule for database insertion
+  // Helper function: Format schedule for database insertion (NEW: Always 7 days with is_enabled flag)
   const formatScheduleForDB = (doctorId: string) => {
+    const allDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
     const availabilityRecords = [];
     
-    for (const [day, schedule] of Object.entries(weekSchedule)) {
-      if (schedule) {
-        availabilityRecords.push({
-          doctor_id: doctorId,
-          day: day, // already lowercase (monday, tuesday, etc.)
-          start_time: convertTo24Hour(schedule.startTime),
-          end_time: convertTo24Hour(schedule.endTime)
-        });
-      }
+    for (const day of allDays) {
+      const schedule = weekSchedule[day as keyof WeekSchedule];
+      const isEnabled = selectedDays.some(d => d.toLowerCase() === day);
+      
+      availabilityRecords.push({
+        doctor_id: doctorId,
+        day: day,
+        start_time: schedule?.startTime ? convertTo24Hour(schedule.startTime) : '09:00:00',
+        end_time: schedule?.endTime ? convertTo24Hour(schedule.endTime) : '17:00:00',
+        is_enabled: isEnabled
+      });
     }
     
     return availabilityRecords;
@@ -912,13 +1116,7 @@ export default function AccountManagementPage() {
         return;
       }
       
-      // Check if schedule availability is provided
-      if (selectedDays.length === 0) {
-        setScheduleError('Please select at least one day for schedule availability.');
-        return;
-      }
-      
-      // Check for any schedule errors
+      // Check for any schedule errors (only if days are selected)
       const errorDays = Object.keys(scheduleErrors);
       if (errorDays.length > 0) {
         setScheduleError('Please fix the time range errors in the selected days.');
@@ -1006,14 +1204,14 @@ export default function AccountManagementPage() {
       console.log('📅 Selected days:', selectedDays);
       console.log('🔑 Doctor ID from API:', data.doctorId);
 
-      // If dentist account with schedule, save availability to database
-      if (newAccount.role === 'dentist' && selectedDays.length > 0 && data.doctorId) {
+      // If dentist account, save availability to database (always create 7 day records)
+      if (newAccount.role === 'dentist' && data.doctorId) {
         console.log('🚀 Attempting to save schedule to database...');
         
         try {
           const supabase = createClient();
           
-          // Format schedule for database
+          // Format schedule for database (always 7 days with is_enabled flag)
           const scheduleRecords = formatScheduleForDB(data.doctorId);
           console.log('📝 Formatted schedule records:', JSON.stringify(scheduleRecords, null, 2));
           
@@ -1060,9 +1258,7 @@ export default function AccountManagementPage() {
       } else {
         console.log('⚠️ Skipping schedule save. Conditions:', {
           isDentist: newAccount.role === 'dentist',
-          hasDays: selectedDays.length > 0,
           hasDoctorId: !!data.doctorId,
-          selectedDaysCount: selectedDays.length,
           doctorIdValue: data.doctorId
         });
       }
@@ -1074,8 +1270,8 @@ export default function AccountManagementPage() {
         `${newAccount.firstName} ${newAccount.lastName} has been added to the system.`,
         [
           `Email: ${newAccount.email}`,
-          ...(newAccount.role === 'dentist' && selectedDays.length > 0 
-            ? [`Schedule: ${selectedDays.length} day(s) configured`] 
+          ...(newAccount.role === 'dentist'
+            ? [`Schedule: ${selectedDays.length} day(s) enabled (7 day records created)`] 
             : [])
         ]
       );
@@ -1542,7 +1738,8 @@ export default function AccountManagementPage() {
                         />
                       </div>
                       <div className="md:col-span-2">
-                        <Label htmlFor="scheduleAvailability">Schedule Availability <span className="text-red-500">*</span></Label>
+                        <Label htmlFor="scheduleAvailability">Schedule Availability</Label>
+                        <p className="text-xs text-gray-500 mt-1">Select days to enable. Unselected days will be disabled by default.</p>
                         
                         {/* Day Selector */}
                         <div className="mt-2 flex flex-wrap gap-2">
@@ -2201,7 +2398,7 @@ export default function AccountManagementPage() {
       {showEditDialog && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-[hsl(258_22%_90%)] p-6">
+            <div className="sticky top-0 bg-white border-b border-[hsl(258_22%_90%)] p-6 z-10 shadow-sm">
               <div className="flex items-center justify-between">
                 <h3 className="text-xl font-semibold text-[hsl(258_46%_25%)]">
                   {isViewMode ? 'User Details' : 'Edit User'}
@@ -2213,6 +2410,8 @@ export default function AccountManagementPage() {
                     setIsViewMode(true);
                     setEditPhoneError('');
                     setEditEmergencyPhoneError('');
+                    setEditScheduleErrors({});
+                    setOpenDropdown(null);
                   }}
                   className="text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] cursor-pointer active:scale-90 transition-all"
                 >
@@ -2390,27 +2589,288 @@ export default function AccountManagementPage() {
                       />
                     </div>
                     <div>
-                      <Label htmlFor="edit-clinicAssignment">Clinic Room</Label>
+                      <Label htmlFor="edit-clinicAssignment">Clinic Room <span className="text-red-500">*</span></Label>
                       <Input
                         id="edit-clinicAssignment"
                         value={selectedUser.clinicAssignment}
                         onChange={(e) => setSelectedUser({ ...selectedUser, clinicAssignment: e.target.value })}
                         disabled={isViewMode}
+                        required
                         placeholder="e.g., Room 101"
                         className="mt-1"
                       />
                     </div>
-                    <div>
-                      <Label htmlFor="edit-scheduleAvailability">Schedule Availability</Label>
-                      <Input
-                        id="edit-scheduleAvailability"
-                        value={selectedUser.scheduleAvailability}
-                        onChange={(e) => setSelectedUser({ ...selectedUser, scheduleAvailability: e.target.value })}
-                        disabled={isViewMode}
-                        placeholder="e.g., Mon-Fri 9AM-5PM"
-                        className="mt-1"
-                      />
-                    </div>
+                  </div>
+                  
+                  {/* Schedule Availability Section */}
+                  <div className="mt-4">
+                    <Label>Schedule Availability</Label>
+                    
+                    {isLoadingSchedule ? (
+                      <div className="mt-2 p-4 bg-gray-50 rounded-lg">
+                        <p className="text-sm text-gray-500">Loading schedule...</p>
+                      </div>
+                    ) : isViewMode ? (
+                      /* View Mode - Display schedule as list */
+                      <div className="mt-2">
+                        {doctorSchedule.length === 0 ? (
+                          <p className="text-sm text-gray-500 p-4 bg-gray-50 rounded-lg">No schedule set</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {doctorSchedule
+                              .filter(day => day.is_enabled)
+                              .map((day) => (
+                                <div key={day.day} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                  <span className="font-medium text-[hsl(258_46%_25%)] capitalize">
+                                    {day.day}
+                                  </span>
+                                  <span className="text-sm text-[hsl(258_22%_50%)]">
+                                    {convertTo12Hour(day.start_time)} - {convertTo12Hour(day.end_time)}
+                                  </span>
+                                </div>
+                              ))}
+                            {doctorSchedule.filter(day => day.is_enabled).length === 0 && (
+                              <p className="text-sm text-gray-500 p-4 bg-gray-50 rounded-lg">No days enabled</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* Edit Mode - Schedule editor UI */
+                      <div className="mt-2 space-y-4">
+                        <p className="text-xs text-gray-500">Select days to enable. Unselected days will be disabled.</p>
+                        
+                        {/* Day Selector */}
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { full: 'Monday', short: 'Mon' },
+                            { full: 'Tuesday', short: 'Tue' },
+                            { full: 'Wednesday', short: 'Wed' },
+                            { full: 'Thursday', short: 'Thu' },
+                            { full: 'Friday', short: 'Fri' },
+                            { full: 'Saturday', short: 'Sat' },
+                            { full: 'Sunday', short: 'Sun' }
+                          ].map((day) => (
+                            <button
+                              key={day.full}
+                              type="button"
+                              onClick={() => toggleEditDay(day.full)}
+                              className={`px-4 py-2 rounded-md text-sm font-medium transition-all cursor-pointer active:scale-95 ${
+                                editSelectedDays.includes(day.full)
+                                  ? 'bg-[hsl(258_46%_25%)] text-white'
+                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                              }`}
+                            >
+                              {day.short}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Time Pickers for Selected Days */}
+                        {editSelectedDays.length > 0 && (
+                          <div className="space-y-3">
+                            {sortDaysInWeekOrder(editSelectedDays).map((day) => {
+                              const dayKey = day.toLowerCase() as keyof WeekSchedule;
+                              const schedule = editWeekSchedule[dayKey] || { startTime: '09:00 AM', endTime: '05:00 PM' };
+                              const startTimeParts = parseTime(schedule.startTime);
+                              const endTimeParts = parseTime(schedule.endTime);
+                              const dayError = editScheduleErrors[day];
+
+                              return (
+                                <div key={day} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                                  <h4 className="text-sm font-semibold text-[hsl(258_46%_25%)] mb-3">{day}</h4>
+                                  
+                                  {/* Single row layout with Start Time and End Time sections */}
+                                  <div className="grid grid-cols-2 gap-6">
+                                    {/* Start Time Section */}
+                                    <div>
+                                      {/* <Label className="text-xs text-[hsl(258_22%_50%)] mb-2 block">Start Time</Label> */}
+                                      <div className="flex items-center gap-1.5">
+                                        {/* Hour - Custom Dropdown */}
+                                        <div className="relative custom-dropdown">
+                                          <button
+                                            type="button"
+                                            onClick={() => setOpenDropdown(openDropdown === `edit-${day}-start-hour` ? null : `edit-${day}-start-hour`)}
+                                            className="w-16 h-9 px-2 rounded-lg border-2 border-[hsl(258_22%_90%)] bg-white text-sm text-[hsl(258_46%_25%)] font-medium hover:border-[hsl(258_46%_25%/0.5)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.2)] focus:border-[hsl(258_46%_25%)] transition-all cursor-pointer text-center active:scale-95"
+                                          >
+                                            {startTimeParts.hour}
+                                          </button>
+                                          {openDropdown === `edit-${day}-start-hour` && (
+                                            <div className="absolute z-50 mt-1 w-16 max-h-48 overflow-y-auto bg-white border-2 border-[hsl(258_46%_25%/0.2)] rounded-lg shadow-lg">
+                                              {Array.from({ length: 12 }, (_, i) => i + 1).map((hour) => {
+                                                const hourStr = hour.toString().padStart(2, '0');
+                                                return (
+                                                  <button
+                                                    key={hour}
+                                                    type="button"
+                                                    onClick={() => {
+                                                      updateEditTimeComponent(day, 'startTime', 'hour', hourStr);
+                                                      setOpenDropdown(null);
+                                                    }}
+                                                    className={`w-full px-2 py-1.5 text-sm text-center transition-all hover:bg-[hsl(258_46%_95%)] ${
+                                                      startTimeParts.hour === hourStr
+                                                        ? 'bg-[hsl(258_46%_25%)] text-white font-semibold'
+                                                        : 'text-[hsl(258_46%_25%)]'
+                                                    }`}
+                                                  >
+                                                    {hourStr}
+                                                  </button>
+                                                );
+                                              })}
+                                            </div>
+                                          )}
+                                        </div>
+                                        
+                                        <span className="text-gray-400 font-semibold">:</span>
+                                        
+                                        {/* Minute - Custom Dropdown */}
+                                        <div className="relative custom-dropdown">
+                                          <button
+                                            type="button"
+                                            onClick={() => setOpenDropdown(openDropdown === `edit-${day}-start-minute` ? null : `edit-${day}-start-minute`)}
+                                            className="w-16 h-9 px-2 rounded-lg border-2 border-[hsl(258_22%_90%)] bg-white text-sm text-[hsl(258_46%_25%)] font-medium hover:border-[hsl(258_46%_25%/0.5)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.2)] focus:border-[hsl(258_46%_25%)] transition-all cursor-pointer text-center active:scale-95"
+                                          >
+                                            {startTimeParts.minute}
+                                          </button>
+                                          {openDropdown === `edit-${day}-start-minute` && (
+                                            <div className="absolute z-50 mt-1 w-16 bg-white border-2 border-[hsl(258_46%_25%/0.2)] rounded-lg shadow-lg">
+                                              {['00', '15', '30', '45'].map((minute) => (
+                                                <button
+                                                  key={minute}
+                                                  type="button"
+                                                  onClick={() => {
+                                                    updateEditTimeComponent(day, 'startTime', 'minute', minute);
+                                                    setOpenDropdown(null);
+                                                  }}
+                                                  className={`w-full px-2 py-1.5 text-sm text-center transition-all hover:bg-[hsl(258_46%_95%)] ${
+                                                    startTimeParts.minute === minute
+                                                      ? 'bg-[hsl(258_46%_25%)] text-white font-semibold'
+                                                      : 'text-[hsl(258_46%_25%)]'
+                                                  }`}
+                                                >
+                                                  {minute}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                        
+                                        {/* AM/PM - Toggle Button */}
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const newPeriod = startTimeParts.period === 'AM' ? 'PM' : 'AM';
+                                            updateEditTimeComponent(day, 'startTime', 'period', newPeriod);
+                                          }}
+                                          className="w-16 h-9 px-2 rounded-lg border-2 border-[hsl(258_22%_90%)] bg-white text-sm text-[hsl(258_46%_25%)] font-semibold hover:border-[hsl(258_46%_25%/0.5)] hover:bg-[hsl(258_46%_95%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.2)] focus:border-[hsl(258_46%_25%)] transition-all cursor-pointer text-center active:scale-95"
+                                        >
+                                          {startTimeParts.period}
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    {/* End Time Section */}
+                                    <div>
+                                      {/* <Label className="text-xs text-[hsl(258_22%_50%)] mb-2 block">End Time</Label> */}
+                                      <div className="flex items-center gap-1.5">
+                                        {/* Hour - Custom Dropdown */}
+                                        <div className="relative custom-dropdown">
+                                          <button
+                                            type="button"
+                                            onClick={() => setOpenDropdown(openDropdown === `edit-${day}-end-hour` ? null : `edit-${day}-end-hour`)}
+                                            className="w-16 h-9 px-2 rounded-lg border-2 border-[hsl(258_22%_90%)] bg-white text-sm text-[hsl(258_46%_25%)] font-medium hover:border-[hsl(258_46%_25%/0.5)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.2)] focus:border-[hsl(258_46%_25%)] transition-all cursor-pointer text-center active:scale-95"
+                                          >
+                                            {endTimeParts.hour}
+                                          </button>
+                                          {openDropdown === `edit-${day}-end-hour` && (
+                                            <div className="absolute z-50 mt-1 w-16 max-h-48 overflow-y-auto bg-white border-2 border-[hsl(258_46%_25%/0.2)] rounded-lg shadow-lg">
+                                              {Array.from({ length: 12 }, (_, i) => i + 1).map((hour) => {
+                                                const hourStr = hour.toString().padStart(2, '0');
+                                                return (
+                                                  <button
+                                                    key={hour}
+                                                    type="button"
+                                                    onClick={() => {
+                                                      updateEditTimeComponent(day, 'endTime', 'hour', hourStr);
+                                                      setOpenDropdown(null);
+                                                    }}
+                                                    className={`w-full px-2 py-1.5 text-sm text-center transition-all hover:bg-[hsl(258_46%_95%)] ${
+                                                      endTimeParts.hour === hourStr
+                                                        ? 'bg-[hsl(258_46%_25%)] text-white font-semibold'
+                                                        : 'text-[hsl(258_46%_25%)]'
+                                                    }`}
+                                                  >
+                                                    {hourStr}
+                                                  </button>
+                                                );
+                                              })}
+                                            </div>
+                                          )}
+                                        </div>
+                                        
+                                        <span className="text-gray-400 font-semibold">:</span>
+                                        
+                                        {/* Minute - Custom Dropdown */}
+                                        <div className="relative custom-dropdown">
+                                          <button
+                                            type="button"
+                                            onClick={() => setOpenDropdown(openDropdown === `edit-${day}-end-minute` ? null : `edit-${day}-end-minute`)}
+                                            className="w-16 h-9 px-2 rounded-lg border-2 border-[hsl(258_22%_90%)] bg-white text-sm text-[hsl(258_46%_25%)] font-medium hover:border-[hsl(258_46%_25%/0.5)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.2)] focus:border-[hsl(258_46%_25%)] transition-all cursor-pointer text-center active:scale-95"
+                                          >
+                                            {endTimeParts.minute}
+                                          </button>
+                                          {openDropdown === `edit-${day}-end-minute` && (
+                                            <div className="absolute z-50 mt-1 w-16 bg-white border-2 border-[hsl(258_46%_25%/0.2)] rounded-lg shadow-lg">
+                                              {['00', '15', '30', '45'].map((minute) => (
+                                                <button
+                                                  key={minute}
+                                                  type="button"
+                                                  onClick={() => {
+                                                    updateEditTimeComponent(day, 'endTime', 'minute', minute);
+                                                    setOpenDropdown(null);
+                                                  }}
+                                                  className={`w-full px-2 py-1.5 text-sm text-center transition-all hover:bg-[hsl(258_46%_95%)] ${
+                                                    endTimeParts.minute === minute
+                                                      ? 'bg-[hsl(258_46%_25%)] text-white font-semibold'
+                                                      : 'text-[hsl(258_46%_25%)]'
+                                                  }`}
+                                                >
+                                                  {minute}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                        
+                                        {/* AM/PM - Toggle Button */}
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const newPeriod = endTimeParts.period === 'AM' ? 'PM' : 'AM';
+                                            updateEditTimeComponent(day, 'endTime', 'period', newPeriod);
+                                          }}
+                                          className="w-16 h-9 px-2 rounded-lg border-2 border-[hsl(258_22%_90%)] bg-white text-sm text-[hsl(258_46%_25%)] font-semibold hover:border-[hsl(258_46%_25%/0.5)] hover:bg-[hsl(258_46%_95%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.2)] focus:border-[hsl(258_46%_25%)] transition-all cursor-pointer text-center active:scale-95"
+                                        >
+                                          {endTimeParts.period}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Error Message */}
+                                  {dayError && (
+                                    <p className="text-xs text-red-600 flex items-center gap-1 mt-3">
+                                      <AlertCircle className="h-3 w-3" />
+                                      {dayError}
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -2553,6 +3013,12 @@ export default function AccountManagementPage() {
                           setIsViewMode(true); // Return to view mode without submitting
                           setEditPhoneError(''); // Clear validation errors
                           setEditEmergencyPhoneError('');
+                          setEditScheduleErrors({});
+                          setOpenDropdown(null);
+                          // Re-fetch schedule to reset any unsaved changes
+                          if (selectedUser?.role === 'dentist') {
+                            fetchUserDetails(selectedUser.user_id, true);
+                          }
                         }}
                         disabled={isUpdating}
                         className="cursor-pointer active:scale-95 transition-transform disabled:cursor-not-allowed"
