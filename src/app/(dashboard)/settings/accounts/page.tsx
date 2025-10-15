@@ -238,6 +238,10 @@ export default function AccountManagementPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 10;
 
+  // Doctors list for staff assignment
+  const [doctorsList, setDoctorsList] = useState<{ doctor_id: string; name: string }[]>([]);
+  const [isLoadingDoctors, setIsLoadingDoctors] = useState(false);
+
   // Protect route - redirect non-admins
   useEffect(() => {
     if (!isLoadingAuth && currentUser && currentUser.role !== 'admin') {
@@ -252,6 +256,13 @@ export default function AccountManagementPage() {
       setCurrentPage(1); // Reset to first page when filters change
     }
   }, [activeTab, roleFilter, statusFilter, searchQuery]);
+
+  // Fetch doctors list when component mounts or when switching to create tab
+  useEffect(() => {
+    if (currentUser?.role === 'admin') {
+      fetchDoctors();
+    }
+  }, [currentUser]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -347,6 +358,47 @@ export default function AccountManagementPage() {
       setExistingUsers([]);
     } finally {
       setIsLoadingUsers(false);
+    }
+  };
+
+  // Fetch doctors list for staff assignment dropdown
+  const fetchDoctors = async () => {
+    setIsLoadingDoctors(true);
+    try {
+      const supabase = createClient();
+      
+      // Fetch doctors with their user information
+      const { data, error } = await supabase
+        .from('doctors')
+        .select(`
+          doctor_id,
+          user_id,
+          users (
+            first_name,
+            middle_name,
+            last_name
+          )
+        `)
+        .order('user_id');
+
+      if (error) {
+        console.error('Error fetching doctors:', error);
+        showNotification('error', 'Failed to Load Doctors', 'Could not fetch doctors list');
+        return;
+      }
+
+      // Format the data for the dropdown
+      const formattedDoctors = data.map((doctor: any) => ({
+        doctor_id: doctor.doctor_id,
+        name: `Dr. ${doctor.users.first_name} ${doctor.users.middle_name ? doctor.users.middle_name + ' ' : ''}${doctor.users.last_name}`
+      }));
+
+      setDoctorsList(formattedDoctors);
+    } catch (error: any) {
+      console.error('Exception fetching doctors:', error);
+      showNotification('error', 'Network Error', 'Failed to load doctors list');
+    } finally {
+      setIsLoadingDoctors(false);
     }
   };
 
@@ -2003,14 +2055,22 @@ export default function AccountManagementPage() {
                           id="assignedDoctor"
                           value={newAccount.assignedDoctor}
                           onChange={(e) => handleInputChange("assignedDoctor", e.target.value)}
-                          className="mt-1 h-10 w-full rounded-md border-1 border-[hsl(258_22%_90%)] bg-white pl-3 pr-8 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)] focus:border-[hsl(258_46%_25%)] cursor-pointer transition-all"
+                          className="mt-1 h-10 w-full rounded-md border-1 border-[hsl(258_22%_90%)] bg-white pl-3 pr-8 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)] focus:border-[hsl(258_46%_25%)] cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                           required
+                          disabled={isLoadingDoctors}
                         >
-                          <option value="">Select doctor</option>
-                          <option value="dr-john-doe">Dr. John Doe</option>
-                          <option value="dr-jane-smith">Dr. Jane Smith</option>
+                          <option value="">
+                            {isLoadingDoctors ? 'Loading doctors...' : 'Select doctor'}
+                          </option>
+                          {doctorsList.map((doctor) => (
+                            <option key={doctor.doctor_id} value={doctor.doctor_id}>
+                              {doctor.name}
+                            </option>
+                          ))}
                         </select>
-                        <p className="mt-1 text-xs text-gray-500">Placeholder list – connect to Doctor accounts once available.</p>
+                        {doctorsList.length === 0 && !isLoadingDoctors && (
+                          <p className="mt-1 text-xs text-amber-600">No doctors available. Please create a dentist account first.</p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -2894,14 +2954,32 @@ export default function AccountManagementPage() {
                     </div>
                     <div>
                       <Label htmlFor="edit-assignedDoctor">Assigned Doctor <span className="text-red-500">*</span></Label>
-                      <Input
-                        id="edit-assignedDoctor"
-                        value={selectedUser.assignedDoctor}
-                        onChange={(e) => setSelectedUser({ ...selectedUser, assignedDoctor: e.target.value })}
-                        disabled={isViewMode}
-                        required
-                        className="mt-1"
-                      />
+                      {isViewMode ? (
+                        <Input
+                          id="edit-assignedDoctor"
+                          value={doctorsList.find(d => d.doctor_id === selectedUser.assignedDoctor)?.name || selectedUser.assignedDoctor}
+                          disabled={true}
+                          className="mt-1"
+                        />
+                      ) : (
+                        <select
+                          id="edit-assignedDoctor"
+                          value={selectedUser.assignedDoctor}
+                          onChange={(e) => setSelectedUser({ ...selectedUser, assignedDoctor: e.target.value })}
+                          className="mt-1 h-10 w-full rounded-md border-1 border-[hsl(258_22%_90%)] bg-white pl-3 pr-8 py-2 text-sm text-[hsl(258_46%_25%)] focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%/0.3)] focus:border-[hsl(258_46%_25%)] cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          required
+                          disabled={isLoadingDoctors}
+                        >
+                          <option value="">
+                            {isLoadingDoctors ? 'Loading doctors...' : 'Select doctor'}
+                          </option>
+                          {doctorsList.map((doctor) => (
+                            <option key={doctor.doctor_id} value={doctor.doctor_id}>
+                              {doctor.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3204,7 +3282,9 @@ export default function AccountManagementPage() {
                           {newAccount.assignedDoctor && (
                             <div>
                               <p className="text-xs text-[hsl(258_22%_50%)]">Assigned Doctor</p>
-                              <p className="text-sm font-medium text-[hsl(258_46%_25%)]">{newAccount.assignedDoctor}</p>
+                              <p className="text-sm font-medium text-[hsl(258_46%_25%)]">
+                                {doctorsList.find(d => d.doctor_id === newAccount.assignedDoctor)?.name || newAccount.assignedDoctor}
+                              </p>
                             </div>
                           )}
                         </>

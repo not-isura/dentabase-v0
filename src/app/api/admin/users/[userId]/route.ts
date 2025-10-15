@@ -73,7 +73,16 @@ export async function GET(
         .select('*')
         .eq('user_id', userId)
         .single();
-      roleData = data;
+      // Map database columns to frontend field names
+      if (data) {
+        roleData = {
+          ...data,
+          designation: data.position_title,
+          assigned_doctor: data.doctor_id
+        };
+      } else {
+        roleData = data;
+      }
     } else if (targetUser.role === 'patient') {
       const { data } = await supabase
         .from('patient')
@@ -180,8 +189,8 @@ export async function PATCH(
       await supabase
         .from('staff')
         .update({
-          designation,
-          assigned_doctor: assignedDoctor
+          position_title: designation, // Map designation to position_title
+          doctor_id: assignedDoctor    // Map assignedDoctor to doctor_id
         })
         .eq('user_id', userId);
     }
