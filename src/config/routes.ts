@@ -1,4 +1,4 @@
-import { Calendar, FileText, Home, Settings, Users, LucideIcon } from "lucide-react";
+import { Calendar, CalendarDays, FileText, Home, Settings, Users, LucideIcon } from "lucide-react";
 
 type UserRole = "admin" | "patient" | "dentist" | "dental_staff";
 
@@ -35,6 +35,14 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     href: "/appointments/admin",
     icon: Calendar,
     allowedRoles: ["dentist", "dental_staff"],
+    showInSidebar: true,
+    exact: true,
+  },
+  {
+    label: "Doctor Schedules",
+    href: "/doctor-schedules",
+    icon: CalendarDays,
+    allowedRoles: ["admin", "patient"],
     showInSidebar: true,
     exact: true,
   },
