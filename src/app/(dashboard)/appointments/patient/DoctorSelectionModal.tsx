@@ -33,7 +33,12 @@ export interface DoctorScheduleCardData {
 interface DoctorSelectionModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onDoctorSelect?: (doctorId: string, doctorName: string, schedules: DoctorScheduleCardData['schedules']) => void;
+  onDoctorSelect?: (
+    doctorId: string, 
+    doctorName: string, 
+    specialization: string,
+    schedules: DoctorScheduleCardData['schedules']
+  ) => void;
 }
 
 const dayOrder = [
@@ -258,7 +263,12 @@ export default function DoctorSelectionModal({
     if (selectedDoctorId && onDoctorSelect) {
       const selectedDoctor = doctors.find(d => d.doctorId === selectedDoctorId);
       if (selectedDoctor) {
-        onDoctorSelect(selectedDoctorId, selectedDoctor.name, selectedDoctor.schedules);
+        onDoctorSelect(
+          selectedDoctorId, 
+          selectedDoctor.name, 
+          selectedDoctor.specialization,
+          selectedDoctor.schedules
+        );
       }
     }
   };

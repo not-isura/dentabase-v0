@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { createClient } from '@/lib/supabase/client';
 
 interface ScheduleSelectionModalProps {
   open: boolean;
@@ -34,12 +35,28 @@ interface DoctorAvailability {
   endTime: string;
 }
 
+interface BookedAppointment {
+  appointment_id: string;
+  booked_start_time: string;
+  booked_end_time: string;
+  status: string;
+}
+
 // Helper functions for date manipulation
 const getWeekStart = (date: Date): Date => {
   const d = new Date(date);
   const day = d.getDay();
   const diff = d.getDate() - day; // Get Sunday
   return new Date(d.setDate(diff));
+};
+
+// Format date as YYYY-MM-DD using LOCAL timezone (not UTC)
+// This ensures dates stay consistent regardless of timezone or time of day
+const formatLocalDate = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 const formatDateRange = (startDate: Date): string => {
@@ -142,6 +159,8 @@ export default function ScheduleSelectionModal({
   const [selectedSlot, setSelectedSlot] = useState<{ date: string; time: string } | null>(null);
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [isWeekDropdownOpen, setIsWeekDropdownOpen] = useState(false);
+  const [bookedAppointments, setBookedAppointments] = useState<BookedAppointment[]>([]);
+  const [isLoadingAppointments, setIsLoadingAppointments] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Convert the passed schedules to the format we need
@@ -182,28 +201,80 @@ export default function ScheduleSelectionModal({
     };
   }, [isWeekDropdownOpen]);
 
+  // Fetch booked appointments from database
+  useEffect(() => {
+    const fetchAppointments = async () => {
+      if (!open || !doctorId) return;
+
+      setIsLoadingAppointments(true);
+      try {
+        const supabase = createClient();
+        
+        // Calculate 12-week date range
+        const startOfWeek1 = getWeekStart(today);
+        const endOfWeek12 = new Date(startOfWeek1);
+        endOfWeek12.setDate(startOfWeek1.getDate() + (12 * 7));
+
+        const { data, error } = await supabase
+          .from('appointments')
+          .select('appointment_id, booked_start_time, booked_end_time, status')
+          .eq('doctor_id', doctorId)
+          .gte('booked_start_time', startOfWeek1.toISOString())
+          .lt('booked_start_time', endOfWeek12.toISOString())
+          .in('status', ['booked', 'arrived', 'ongoing', 'completed'])
+          .order('booked_start_time', { ascending: true });
+
+        if (error) {
+          console.error('Error fetching appointments:', error);
+          setBookedAppointments([]);
+        } else {
+          setBookedAppointments(data || []);
+        }
+      } catch (err) {
+        console.error('Unexpected error fetching appointments:', err);
+        setBookedAppointments([]);
+      } finally {
+        setIsLoadingAppointments(false);
+      }
+    };
+
+    fetchAppointments();
+  }, [open, doctorId, today]);
+
   // Get availability for a specific day
   const getDayAvailability = useCallback((date: Date): DoctorAvailability | null => {
     const dayName = getDayName(date);
     return doctorAvailability.find((avail) => avail.day === dayName) || null;
   }, [doctorAvailability]);
 
-  // Mock reserved slots for October 17, 2025
+  // Check if a time slot is reserved based on real appointment data
   const isSlotReserved = useCallback((date: Date, time: string): boolean => {
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = formatLocalDate(date);
     
-    // Check if it's October 17, 2025
-    if (dateStr === '2025-10-17') {
-      // Reserved: 7:00 AM - 9:00 AM (exactly 2 hours)
-      const reserved7to9 = ['07:00', '07:30', '08:00', '08:30', '09:00'];
-      // Reserved: 11:00 AM - 1:00 PM (exactly 2 hours)
-      const reserved11to1 = ['11:00', '11:30', '12:00', '12:30', '13:00'];
+    // Check against real booked appointments
+    return bookedAppointments.some((appointment) => {
+      const appointmentDate = new Date(appointment.booked_start_time);
+      const appointmentDateStr = formatLocalDate(appointmentDate);
       
-      return [...reserved7to9, ...reserved11to1].includes(time);
-    }
-    
-    return false;
-  }, []);
+      // Check if appointment is on the same day
+      if (appointmentDateStr !== dateStr) return false;
+
+      // Extract time in HH:MM format using LOCAL timezone
+      const startTime = new Date(appointment.booked_start_time);
+      const endTime = new Date(appointment.booked_end_time);
+      
+      const startHour = startTime.getHours(); // Use local time
+      const startMin = startTime.getMinutes();
+      const endHour = endTime.getHours();
+      const endMin = endTime.getMinutes();
+      
+      const startTimeStr = `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}`;
+      const endTimeStr = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
+      
+      // Check if the time slot falls within the appointment range
+      return time >= startTimeStr && time < endTimeStr;
+    });
+  }, [bookedAppointments]);
 
   const handlePreviousWeek = () => {
     const newWeekStart = new Date(currentWeekStart);
@@ -250,7 +321,7 @@ export default function ScheduleSelectionModal({
       } else {
         setSelectedDay(date);
         // Keep existing time if already set, otherwise use default
-        const dateStr = date.toISOString().split('T')[0];
+        const dateStr = formatLocalDate(date);
         const currentTime = selectedSlot?.time || '09:00';
         setSelectedSlot({ date: dateStr, time: currentTime });
       }
@@ -259,7 +330,7 @@ export default function ScheduleSelectionModal({
 
   const handleTimeSlotClick = (time: string) => {
     if (selectedDay) {
-      const dateStr = selectedDay.toISOString().split('T')[0];
+      const dateStr = formatLocalDate(selectedDay);
       setSelectedSlot({ date: dateStr, time });
     }
   };
@@ -489,61 +560,57 @@ export default function ScheduleSelectionModal({
                           </div>
                         ) : (
                           <>
-                            {/* Render occupied blocks positioned by time */}
+                            {/* Render occupied blocks directly from appointment data */}
                             {(() => {
-                              const slots = generateTimeSlots(availability.startTime, availability.endTime, 30);
-                              const groups: { reserved: boolean; slots: string[] }[] = [];
-                              let currentGroup: { reserved: boolean; slots: string[] } | null = null;
-
-                              // Group consecutive reserved/available slots together
-                              slots.forEach((timeSlot) => {
-                                const reserved = isSlotReserved(date, timeSlot);
-                                
-                                if (!currentGroup || currentGroup.reserved !== reserved) {
-                                  currentGroup = { reserved, slots: [timeSlot] };
-                                  groups.push(currentGroup);
-                                } else {
-                                  currentGroup.slots.push(timeSlot);
-                                }
+                              const dateStr = formatLocalDate(date);
+                              
+                              // Filter appointments for this specific date
+                              const dayAppointments = bookedAppointments.filter((appointment) => {
+                                const appointmentDate = new Date(appointment.booked_start_time);
+                                const appointmentDateStr = formatLocalDate(appointmentDate);
+                                return appointmentDateStr === dateStr;
                               });
 
-                              // Only render reserved blocks
-                              return groups
-                                .filter(group => group.reserved)
-                                .map((group, groupIndex) => {
-                                  const startTime = group.slots[0];
-                                  const endTime = group.slots[group.slots.length - 1];
-                                  
-                                  // Calculate position based on start time (6 AM = 0, each hour = 48px)
-                                  const [startHour, startMin] = startTime.split(':').map(Number);
-                                  const [endHour, endMin] = endTime.split(':').map(Number);
-                                  
-                                  const topOffset = ((startHour - 6) * 48) + ((startMin / 60) * 48);
-                                  const durationHours = (endHour - startHour) + ((endMin - startMin) / 60);
-                                  const height = durationHours * 48;
-                                  
-                                  return (
-                                    <div
-                                      key={`group-${groupIndex}`}
-                                      className="absolute bg-red-100 border-2 border-red-300 rounded-lg p-2 pointer-events-auto z-10"
-                                      style={{
-                                        top: `${topOffset + 4}px`,
-                                        left: '8px',
-                                        right: '8px',
-                                        height: `${height - 8}px`,
-                                      }}
-                                    >
-                                      <div className="flex flex-col h-full justify-center">
-                                        <span className="text-[10px] font-bold text-red-700 uppercase tracking-wide">
-                                          Occupied
-                                        </span>
-                                        <p className="text-xs font-semibold text-red-800 mt-0.5">
-                                          {formatTime(startTime)} - {formatTime(endTime)}
-                                        </p>
-                                      </div>
+                              // Render each appointment as a separate block
+                              return dayAppointments.map((appointment, index) => {
+                                const startTime = new Date(appointment.booked_start_time);
+                                const endTime = new Date(appointment.booked_end_time);
+                                
+                                const startHour = startTime.getHours();
+                                const startMin = startTime.getMinutes();
+                                const endHour = endTime.getHours();
+                                const endMin = endTime.getMinutes();
+                                
+                                const startTimeStr = `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}`;
+                                const endTimeStr = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
+                                
+                                // Calculate position based on start time (6 AM = 0, each hour = 48px)
+                                const topOffset = ((startHour - 6) * 48) + ((startMin / 60) * 48);
+                                const durationHours = (endHour - startHour) + ((endMin - startMin) / 60);
+                                const height = durationHours * 48;
+                                
+                                return (
+                                  <div
+                                    key={`appointment-${appointment.appointment_id}`}
+                                    className="absolute bg-red-100 border-2 border-red-300 rounded-lg p-2 pointer-events-auto z-10"
+                                    style={{
+                                      top: `${topOffset + 4}px`,
+                                      left: '8px',
+                                      right: '8px',
+                                      height: `${height - 8}px`,
+                                    }}
+                                  >
+                                    <div className="flex flex-col h-full justify-center">
+                                      <span className="text-[10px] font-bold text-red-700 uppercase tracking-wide">
+                                        Occupied
+                                      </span>
+                                      <p className="text-xs font-semibold text-red-800 mt-0.5">
+                                        {formatTime(startTimeStr)} - {formatTime(endTimeStr)}
+                                      </p>
                                     </div>
-                                  );
-                                });
+                                  </div>
+                                );
+                              });
                             })()}
                           </>
                         )}

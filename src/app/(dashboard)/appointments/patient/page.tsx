@@ -1,11 +1,14 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert } from "@/components/ui/alert";
 import { Check, Clock, Plus, X } from "lucide-react";
-import DoctorSelectionModal from "./DoctorSelectionModal";
-import ScheduleSelectionModal from "./ScheduleSelectionModal";
+import { createClient } from '@/lib/supabase/client';
+import DoctorSelectionModal from './DoctorSelectionModal';
+import ScheduleSelectionModal from './ScheduleSelectionModal';
+import AppointmentConfirmationModal from './AppointmentConfirmationModal';
 
 type StatusEntry = {
   date: string;
@@ -223,9 +226,11 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({
 export default function AppointmentsPatientPage() {
   const [isDoctorModalOpen, setIsDoctorModalOpen] = useState(false);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [isConfirmationModalOpen, setIsConfirmationModalOpen] = useState(false);
   const [selectedDoctor, setSelectedDoctor] = useState<{ 
     id: string; 
     name: string;
+    specialization: string;
     schedules: Array<{
       availabilityId: string;
       day: string;
@@ -234,6 +239,75 @@ export default function AppointmentsPatientPage() {
       endTime: string;
     }>;
   } | null>(null);
+  const [selectedSchedule, setSelectedSchedule] = useState<{
+    doctorId: string;
+    date: string;
+    time: string;
+  } | null>(null);
+  
+  // Alert/notification state
+  const [alert, setAlert] = useState<{
+    show: boolean;
+    variant: 'success' | 'error';
+    message: string;
+  } | null>(null);
+  
+  // Patient info - fetch from database
+  const [patientName, setPatientName] = useState<string>('Loading...');
+  const [isLoadingPatient, setIsLoadingPatient] = useState(true);
+
+  // Fetch patient name on mount
+  useEffect(() => {
+    const fetchPatientName = async () => {
+      try {
+        const supabase = createClient();
+        
+        // Get authenticated user
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        
+        if (authError || !user) {
+          console.error('Auth error:', authError);
+          setPatientName('Guest');
+          setIsLoadingPatient(false);
+          return;
+        }
+
+        // Get user profile from users table
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('first_name, middle_name, last_name')
+          .eq('auth_id', user.id)
+          .single();
+
+        if (userError || !userData) {
+          console.error('User fetch error:', userError);
+          setPatientName('Patient');
+          setIsLoadingPatient(false);
+          return;
+        }
+
+        // Format full name
+        const middleInitial = userData.middle_name 
+          ? `${userData.middle_name.charAt(0)}.` 
+          : '';
+        
+        const fullName = [
+          userData.first_name,
+          middleInitial,
+          userData.last_name
+        ].filter(Boolean).join(' ').trim();
+
+        setPatientName(fullName || 'Patient');
+        setIsLoadingPatient(false);
+      } catch (error) {
+        console.error('Error fetching patient name:', error);
+        setPatientName('Patient');
+        setIsLoadingPatient(false);
+      }
+    };
+
+    fetchPatientName();
+  }, []);
 
   const milestoneMessages = {
     Requested: "Your appointment request has been sent.",
@@ -266,15 +340,15 @@ export default function AppointmentsPatientPage() {
     setIsDoctorModalOpen(true);
   };
 
-  const handleDoctorSelect = (doctorId: string, doctorName: string, schedules: Array<{
+  const handleDoctorSelect = (doctorId: string, doctorName: string, specialization: string, schedules: Array<{
     availabilityId: string;
     day: string;
     dayLabel: string;
     startTime: string;
     endTime: string;
   }>) => {
-    console.log('Selected doctor:', doctorId, doctorName);
-    setSelectedDoctor({ id: doctorId, name: doctorName, schedules });
+    console.log('Selected doctor:', doctorId, doctorName, specialization);
+    setSelectedDoctor({ id: doctorId, name: doctorName, specialization, schedules });
     setIsDoctorModalOpen(false);
     setIsScheduleModalOpen(true);
   };
@@ -286,13 +360,152 @@ export default function AppointmentsPatientPage() {
 
   const handleScheduleSelect = (scheduleData: any) => {
     console.log('Selected schedule:', scheduleData);
-    // TODO: Implement final appointment confirmation logic
+    setSelectedSchedule(scheduleData);
     setIsScheduleModalOpen(false);
+    setIsConfirmationModalOpen(true);
+  };
+
+  const handleBackToSchedule = () => {
+    setIsConfirmationModalOpen(false);
+    setIsScheduleModalOpen(true);
+  };
+
+  const handleConfirmAppointment = async (concern: string) => {
+    if (!selectedDoctor || !selectedSchedule) return;
+
+    try {
+      const supabase = createClient();
+
+      // 1. Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !user) {
+        console.error('Auth error:', authError);
+        setAlert({
+          show: true,
+          variant: 'error',
+          message: 'You must be logged in to book an appointment.'
+        });
+        return;
+      }
+
+      // 2. First, get the user_id from the users table using auth_id
+      console.log('🔍 Looking up user with auth_id:', user.id);
+      
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('user_id')
+        .eq('auth_id', user.id)
+        .single();
+
+      if (userError || !userData) {
+        console.error('❌ User lookup error:', userError);
+        setAlert({
+          show: true,
+          variant: 'error',
+          message: 'Could not find your user profile. Please contact support.'
+        });
+        return;
+      }
+
+      console.log('✅ Found user_id:', userData.user_id);
+
+      // 3. Now get patient_id from the patient table using user_id
+      const { data: patientData, error: patientError } = await supabase
+        .from('patient')
+        .select('patient_id')
+        .eq('user_id', userData.user_id)
+        .single();
+
+      if (patientError || !patientData) {
+        console.error('❌ Patient lookup error:', patientError);
+        console.log('📋 Debug info:', {
+          auth_id: user.id,
+          user_id: userData.user_id,
+          error: patientError
+        });
+        setAlert({
+          show: true,
+          variant: 'error',
+          message: 'Could not find your patient profile. Please contact support.'
+        });
+        return;
+      }
+
+      console.log('✅ Found patient_id:', patientData.patient_id);
+
+      // 4. Construct the full timestamp for requested_start_time with timezone
+      // The user selected time is in their LOCAL timezone (Philippines = UTC+8)
+      // Format: YYYY-MM-DDTHH:MM:SS+08:00 (explicit timezone offset)
+      const requestedStartTime = `${selectedSchedule.date}T${selectedSchedule.time}:00+08:00`;
+
+      console.log('📝 Submitting appointment:', {
+        patientId: patientData.patient_id,
+        doctorId: selectedDoctor.id,
+        localTime: `${selectedSchedule.date} ${selectedSchedule.time}`,
+        requestedStartTime,
+        concern,
+      });
+
+      // 5. Insert appointment into database
+      const { error: insertError } = await supabase
+        .from('appointments')
+        .insert({
+          patient_id: patientData.patient_id,
+          doctor_id: selectedDoctor.id,
+          requested_start_time: requestedStartTime,
+          status: 'requested',
+          concern: concern.trim(),
+        });
+
+      if (insertError) {
+        console.error('Insert error:', insertError);
+        throw insertError;
+      }
+
+      // 5. Success - close modals and reset state
+      console.log('✅ Appointment request submitted successfully!');
+      
+      setAlert({
+        show: true,
+        variant: 'success',
+        message: 'Appointment request submitted successfully! The clinic will review and confirm your appointment.'
+      });
+      
+      setIsConfirmationModalOpen(false);
+      setSelectedDoctor(null);
+      setSelectedSchedule(null);
+      
+      // Auto-dismiss alert after 5 seconds
+      setTimeout(() => {
+        setAlert(null);
+      }, 5000);
+      
+    } catch (error) {
+      console.error('Error submitting appointment:', error);
+      setAlert({
+        show: true,
+        variant: 'error',
+        message: 'Failed to submit appointment request. Please try again.'
+      });
+      
+      // Auto-dismiss alert after 5 seconds
+      setTimeout(() => {
+        setAlert(null);
+      }, 5000);
+    }
   };
 
   return (
     <div className="space-y-8">
-  <header className="space-y-1">
+      {/* Alert Notification */}
+      {alert?.show && (
+        <Alert variant={alert.variant}>
+          {alert.message}
+        </Alert>
+      )}
+
+      <header className="space-y-1">
         <h2 className="text-2xl font-bold text-[hsl(258_46%_25%)]">Patient Appointments</h2>
         <p className="text-[hsl(258_22%_50%)]">
           Review the status of your latest appointment activity.
@@ -323,6 +536,21 @@ export default function AppointmentsPatientPage() {
           doctorSchedules={selectedDoctor.schedules}
           onBack={handleBackToDoctor}
           onScheduleSelect={handleScheduleSelect}
+        />
+      )}
+
+      {selectedDoctor && selectedSchedule && (
+        <AppointmentConfirmationModal
+          open={isConfirmationModalOpen}
+          onOpenChange={setIsConfirmationModalOpen}
+          doctorId={selectedDoctor.id}
+          doctorName={selectedDoctor.name}
+          doctorSpecialization={selectedDoctor.specialization}
+          patientName={patientName}
+          appointmentDate={selectedSchedule.date}
+          appointmentTime={selectedSchedule.time}
+          onBack={handleBackToSchedule}
+          onConfirm={handleConfirmAppointment}
         />
       )}
     </div>
