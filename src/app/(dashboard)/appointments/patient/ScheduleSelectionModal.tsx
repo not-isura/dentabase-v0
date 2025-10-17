@@ -140,6 +140,7 @@ export default function ScheduleSelectionModal({
   const today = new Date();
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(getWeekStart(today));
   const [selectedSlot, setSelectedSlot] = useState<{ date: string; time: string } | null>(null);
+  const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [isWeekDropdownOpen, setIsWeekDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -217,7 +218,14 @@ export default function ScheduleSelectionModal({
   const handleNextWeek = () => {
     const newWeekStart = new Date(currentWeekStart);
     newWeekStart.setDate(currentWeekStart.getDate() + 7);
-    setCurrentWeekStart(newWeekStart);
+    
+    // Don't allow going beyond 12 weeks (same as dropdown limit)
+    const maxWeekStart = new Date(getWeekStart(today));
+    maxWeekStart.setDate(maxWeekStart.getDate() + (11 * 7)); // Week 12 is at index 11 (0-based)
+    
+    if (newWeekStart <= maxWeekStart) {
+      setCurrentWeekStart(newWeekStart);
+    }
   };
 
   const handleWeekSelect = (weekValue: string) => {
@@ -227,6 +235,33 @@ export default function ScheduleSelectionModal({
 
   const toggleWeekDropdown = () => {
     setIsWeekDropdownOpen(!isWeekDropdownOpen);
+  };
+
+  const handleDayClick = (date: Date) => {
+    const isPast = date < new Date(today.setHours(0, 0, 0, 0));
+    const availability = getDayAvailability(date);
+    
+    // Only allow selection if not past and has availability
+    if (!isPast && availability) {
+      // Toggle: if clicking the same day, unselect it
+      if (selectedDay?.toDateString() === date.toDateString()) {
+        setSelectedDay(null);
+        setSelectedSlot(null);
+      } else {
+        setSelectedDay(date);
+        // Keep existing time if already set, otherwise use default
+        const dateStr = date.toISOString().split('T')[0];
+        const currentTime = selectedSlot?.time || '09:00';
+        setSelectedSlot({ date: dateStr, time: currentTime });
+      }
+    }
+  };
+
+  const handleTimeSlotClick = (time: string) => {
+    if (selectedDay) {
+      const dateStr = selectedDay.toISOString().split('T')[0];
+      setSelectedSlot({ date: dateStr, time });
+    }
   };
 
   const handleNext = () => {
@@ -251,49 +286,56 @@ export default function ScheduleSelectionModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto py-4">
-          {/* Week Navigation Controls */}
-          <div className="flex items-center justify-center mb-6 gap-2 relative" ref={dropdownRef}>
+        {/* Week Navigation Controls - Sticky at top, outside scrollable area */}
+        <div className="border-b border-gray-200 bg-white py-2 px-2">
+          <div className="flex items-center justify-center gap-1.5 relative" ref={dropdownRef}>
             <Button
               variant="outline"
               size="icon"
               onClick={handlePreviousWeek}
               disabled={currentWeekStart <= getWeekStart(today)}
-              className="h-9 w-9 border-[hsl(258_46%_25%)] text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.08)] disabled:opacity-30"
+              className="h-7 w-7 border-[hsl(258_46%_25%)] text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.08)] disabled:opacity-30"
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
             
             {/* Clickable Week Label with Dropdown */}
             <button
               onClick={toggleWeekDropdown}
-              className="flex items-center gap-2 px-4 py-2 rounded-md border border-[hsl(258_46%_25%)] bg-white hover:bg-[hsl(258_46%_25%/0.05)] transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[hsl(258_46%_25%)] bg-white hover:bg-[hsl(258_46%_25%/0.05)] transition-colors"
             >
-              <span className="font-semibold text-[hsl(258_46%_25%)] min-w-[200px] text-center">
+              <span className="font-medium text-sm text-[hsl(258_46%_25%)] min-w-[180px] text-center">
                 {formatDateRange(currentWeekStart)}
               </span>
-              <ChevronDown className={`h-4 w-4 text-[hsl(258_46%_25%)] transition-transform ${isWeekDropdownOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`h-3.5 w-3.5 text-[hsl(258_46%_25%)] transition-transform ${isWeekDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
             
             <Button
               variant="outline"
               size="icon"
               onClick={handleNextWeek}
-              className="h-9 w-9 border-[hsl(258_46%_25%)] text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.08)]"
+              disabled={(() => {
+                const nextWeekStart = new Date(currentWeekStart);
+                nextWeekStart.setDate(currentWeekStart.getDate() + 7);
+                const maxWeekStart = new Date(getWeekStart(today));
+                maxWeekStart.setDate(maxWeekStart.getDate() + (11 * 7)); // Week 12 is at index 11
+                return nextWeekStart > maxWeekStart; // Disable if NEXT week would exceed limit
+              })()}
+              className="h-7 w-7 border-[hsl(258_46%_25%)] text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.08)] disabled:opacity-30"
             >
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-3.5 w-3.5" />
             </Button>
 
             {/* Custom Week Dropdown */}
             {isWeekDropdownOpen && (
-              <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-[280px] bg-white border border-[hsl(258_46%_25%)] rounded-lg shadow-lg max-h-[300px] overflow-y-auto z-50">
+              <div className="absolute top-full mt-1 left-1/2 -translate-x-1/2 w-[240px] bg-white border border-[hsl(258_46%_25%)] rounded-lg shadow-lg max-h-[280px] overflow-y-auto z-50">
                 {availableWeeks.map((week) => {
                   const isCurrentWeek = new Date(week.value).getTime() === currentWeekStart.getTime();
                   return (
                     <button
                       key={week.value}
                       onClick={() => handleWeekSelect(week.value)}
-                      className={`w-full px-4 py-3 text-left text-sm transition-colors border-b border-gray-100 last:border-b-0 ${
+                      className={`w-full px-3 py-2 text-left text-xs transition-colors border-b border-gray-100 last:border-b-0 ${
                         isCurrentWeek
                           ? 'bg-[hsl(258_46%_25%)] text-white font-semibold'
                           : 'text-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_98%)]'
@@ -306,7 +348,10 @@ export default function ScheduleSelectionModal({
               </div>
             )}
           </div>
+        </div>
 
+        {/* Scrollable Calendar Area */}
+        <div className="flex-1 overflow-y-auto pt-0.5 pb-2">
           {/* Weekly Calendar Grid */}
           <div className="border border-gray-200 rounded-lg overflow-hidden">
             {/* Day Headers Row - with Time column */}
@@ -322,19 +367,19 @@ export default function ScheduleSelectionModal({
                 return (
                   <div
                     key={index}
-                    className={`text-center py-3 border-r border-[hsl(258_46%_30%)] last:border-r-0 ${
+                    className={`text-center py-2 border-r border-[hsl(258_46%_30%)] last:border-r-0 ${
                       isTodayDate ? 'bg-[hsl(258_46%_20%)]' : ''
                     }`}
                   >
-                    <div className="text-white text-xs font-medium uppercase tracking-wide">
+                    <div className="text-white text-[10px] font-medium uppercase tracking-wide">
                       {dayLabel}
                     </div>
                     {isTodayDate ? (
-                      <div className="bg-white text-[hsl(258_46%_25%)] rounded-full w-8 h-8 flex items-center justify-center mx-auto mt-1 text-lg font-bold">
+                      <div className="bg-white text-[hsl(258_46%_25%)] rounded-full w-7 h-7 flex items-center justify-center mx-auto mt-0.5 text-base font-bold">
                         {dateNumber}
                       </div>
                     ) : (
-                      <div className="text-white text-lg font-bold mt-1">
+                      <div className="text-white text-base font-bold mt-0.5 h-7 flex items-center justify-center">
                         {dateNumber}
                       </div>
                     )}
@@ -362,14 +407,34 @@ export default function ScheduleSelectionModal({
               {weekDays.map((date, dayIndex) => {
                   const isPast = date < new Date(today.setHours(0, 0, 0, 0));
                   const availability = getDayAvailability(date);
+                  const isSelected = selectedDay?.toDateString() === date.toDateString();
+                  const isClickable = !isPast && availability;
 
                   return (
                     <div
                       key={dayIndex}
-                      className={`border-r border-gray-200 last:border-r-0 relative ${
+                      onClick={() => handleDayClick(date)}
+                      className={`border-r border-gray-200 last:border-r-0 relative transition-all ${
                         isPast ? 'bg-gray-50' : 'bg-white'
+                      } ${
+                        isClickable ? 'cursor-pointer hover:bg-blue-50/30' : 'cursor-not-allowed'
+                      } ${
+                        isSelected ? 'bg-blue-50/50 z-20' : ''
                       }`}
                     >
+                      {/* Selection border overlay - doesn't affect layout */}
+                      {isSelected && (
+                        <>
+                          {/* Left border */}
+                          <div className="absolute top-0 bottom-0 left-0 w-1 bg-blue-500 z-30 animate-in slide-in-from-left duration-300" />
+                          {/* Right border */}
+                          <div className="absolute top-0 bottom-0 right-0 w-1 bg-blue-500 z-30 animate-in slide-in-from-right duration-300" />
+                          {/* Top border */}
+                          <div className="absolute top-0 left-0 right-0 h-1 bg-blue-500 z-30 animate-in slide-in-from-top duration-300" />
+                          {/* Bottom border */}
+                          <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-500 z-30 animate-in slide-in-from-bottom duration-300" />
+                        </>
+                      )}
                       {/* Hour grid lines */}
                       {[6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].map((hour, index) => (
                         <div
@@ -488,9 +553,127 @@ export default function ScheduleSelectionModal({
                 })}
             </div>
           </div>
+
         </div>
 
-        <DialogFooter className="flex flex-row justify-between gap-3 sm:justify-between mt-4">
+        {/* Custom Time Picker - Sticky at bottom, outside scrollable area */}
+        {selectedDay && selectedSlot && (
+          <div className="border-t border-gray-200 bg-gradient-to-r from-blue-50 to-purple-50 p-3">
+            <div className="flex items-center justify-between gap-4">
+              {/* Date Info */}
+              <div className="flex-shrink-0">
+                <p className="text-xs font-medium text-gray-600">Request for</p>
+                <p className="text-xs font-bold text-[hsl(258_46%_25%)]">
+                  {selectedDay.toLocaleDateString('en-US', { 
+                    month: 'long', 
+                    day: 'numeric',
+                    year: 'numeric'
+                  })}
+                </p>
+              </div>
+
+              {/* Custom Time Picker */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-gray-700">Time:</span>
+                
+                {/* Hour Dropdown - Custom styled */}
+                <div className="relative">
+                  <select
+                    className="appearance-none px-2 py-1 pr-6 text-xs font-bold border border-[hsl(258_46%_25%)] rounded bg-white text-[hsl(258_46%_25%)] focus:outline-none focus:ring-1 focus:ring-[hsl(258_46%_25%)] cursor-pointer"
+                    onChange={(e) => {
+                      const hour12 = parseInt(e.target.value);
+                      const currentTime = selectedSlot.time.split(':');
+                      const currentHour24 = parseInt(currentTime[0]);
+                      const isPM = currentHour24 >= 12;
+                      
+                      // Convert 12-hour to 24-hour
+                      let newHour24 = hour12;
+                      if (isPM) {
+                        newHour24 = hour12 === 12 ? 12 : hour12 + 12;
+                      } else {
+                        newHour24 = hour12 === 12 ? 0 : hour12;
+                      }
+                      
+                      const hourStr = String(newHour24).padStart(2, '0');
+                      handleTimeSlotClick(`${hourStr}:${currentTime[1]}`);
+                    }}
+                    value={(() => {
+                      const hour24 = parseInt(selectedSlot.time.split(':')[0]);
+                      if (hour24 === 0) return '12';
+                      if (hour24 > 12) return String(hour24 - 12);
+                      return String(hour24);
+                    })()}
+                  >
+                    {[...Array(12)].map((_, i) => {
+                      const hour = i + 1;
+                      return (
+                        <option key={hour} value={String(hour)}>
+                          {String(hour).padStart(2, '0')}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {/* Custom dropdown arrow */}
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none">
+                    <svg className="w-3 h-3 text-[hsl(258_46%_25%)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+
+                <span className="text-sm font-bold text-[hsl(258_46%_25%)]">:</span>
+
+                {/* Minute Dropdown - Custom styled */}
+                <div className="relative">
+                  <select
+                    className="appearance-none px-2 py-1 pr-6 text-xs font-bold border border-[hsl(258_46%_25%)] rounded bg-white text-[hsl(258_46%_25%)] focus:outline-none focus:ring-1 focus:ring-[hsl(258_46%_25%)] cursor-pointer"
+                    onChange={(e) => {
+                      const minute = e.target.value;
+                      const currentHour = selectedSlot.time.split(':')[0];
+                      handleTimeSlotClick(`${currentHour}:${minute}`);
+                    }}
+                    value={selectedSlot.time.split(':')[1]}
+                  >
+                    <option value="00">00</option>
+                    <option value="30">30</option>
+                  </select>
+                  {/* Custom dropdown arrow */}
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none">
+                    <svg className="w-3 h-3 text-[hsl(258_46%_25%)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+
+                {/* AM/PM Toggle Button */}
+                <button
+                  onClick={() => {
+                    const currentTime = selectedSlot.time.split(':');
+                    const currentHour24 = parseInt(currentTime[0]);
+                    let newHour24;
+                    
+                    // Toggle between AM and PM
+                    if (currentHour24 >= 12) {
+                      // Currently PM, switch to AM
+                      newHour24 = currentHour24 === 12 ? 0 : currentHour24 - 12;
+                    } else {
+                      // Currently AM, switch to PM
+                      newHour24 = currentHour24 === 0 ? 12 : currentHour24 + 12;
+                    }
+                    
+                    const hourStr = String(newHour24).padStart(2, '0');
+                    handleTimeSlotClick(`${hourStr}:${currentTime[1]}`);
+                  }}
+                  className="px-3 py-1 bg-[hsl(258_46%_25%)] text-white text-xs font-bold rounded hover:bg-[hsl(258_46%_30%)] transition-colors min-w-[48px]"
+                >
+                  {parseInt(selectedSlot.time.split(':')[0]) >= 12 ? 'PM' : 'AM'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="flex flex-row justify-between gap-3 sm:justify-between pt-4">
           <Button
             variant="outline"
             onClick={onBack}
@@ -500,10 +683,10 @@ export default function ScheduleSelectionModal({
           </Button>
           <Button
             onClick={handleNext}
-            disabled
+            disabled={!selectedDay}
             className="bg-[hsl(258_46%_25%)] text-white hover:bg-[hsl(258_46%_30%)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Next (Coming Soon)
+            Next
           </Button>
         </DialogFooter>
       </DialogContent>
