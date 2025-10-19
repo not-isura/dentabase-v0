@@ -4,7 +4,8 @@ import React, { useMemo, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
-import { Check, Clock, Plus, X, Stethoscope, Calendar, FileText } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Check, Clock, Plus, X, Stethoscope, Calendar, FileText, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { createClient } from '@/lib/supabase/client';
 import DoctorSelectionModal from './DoctorSelectionModal';
 import ScheduleSelectionModal from './ScheduleSelectionModal';
@@ -50,8 +51,8 @@ const ProgressTracker: React.FC<ProgressTrackerProps> = ({ steps, currentStep, r
   const rejectedSet = useMemo(() => new Set(rejectedStepIndices), [rejectedStepIndices]);
 
   return (
-    <div className="w-full">
-      <div className="mx-auto flex w-[80%] max-w-2xl items-center justify-between md:w-2/3">
+    <div className="w-full py-2">
+      <div className="mx-auto flex w-[85%] max-w-2xl items-center justify-between md:w-2/3">
         {steps.map((_, index) => {
           const isCompleted = normalizedStep > index;
           const isActive = !flowComplete && index === normalizedStep;
@@ -63,42 +64,49 @@ const ProgressTracker: React.FC<ProgressTrackerProps> = ({ steps, currentStep, r
             <div key={`tracker-circle-${index}`} className="relative flex flex-1 items-center justify-center">
               {index > 0 && (
                 <>
-                  <span className="pointer-events-none absolute left-0 top-1/2 h-[2px] w-1/2 -translate-y-1/2 rounded-full bg-gray-300" />
+                  <span className="pointer-events-none absolute left-0 top-1/2 h-[3px] w-1/2 -translate-y-1/2 rounded-full bg-gray-200" />
                   {hasCompletedLeft && (
-                    <span className="pointer-events-none absolute left-0 top-1/2 h-[2px] w-1/2 -translate-y-1/2 rounded-full bg-[hsl(258_46%_25%)] transition-colors duration-300" />
+                    <span className="pointer-events-none absolute left-0 top-1/2 h-[3px] w-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-[hsl(258_46%_45%)] to-[hsl(258_46%_40%)] transition-all duration-500" />
                   )}
                 </>
               )}
               {index < steps.length - 1 && (
                 <>
-                  <span className="pointer-events-none absolute right-0 top-1/2 h-[2px] w-1/2 -translate-y-1/2 rounded-full bg-gray-300" />
+                  <span className="pointer-events-none absolute right-0 top-1/2 h-[3px] w-1/2 -translate-y-1/2 rounded-full bg-gray-200" />
                   {hasCompletedRight && (
-                    <span className="pointer-events-none absolute right-0 top-1/2 h-[2px] w-1/2 -translate-y-1/2 rounded-full bg-[hsl(258_46%_25%)] transition-colors duration-300" />
+                    <span className="pointer-events-none absolute right-0 top-1/2 h-[3px] w-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-[hsl(258_46%_40%)] to-[hsl(258_46%_45%)] transition-all duration-500" />
                   )}
                 </>
               )}
               <div
-                className={`relative z-10 flex h-10 w-10 items-center justify-center rounded-full border-2 text-base font-semibold transition-colors duration-200 ${
+                className={`relative z-10 flex h-11 w-11 items-center justify-center rounded-full border-[3px] text-base font-bold transition-all duration-300 shadow-sm ${
                   isRejected
-                    ? "border-red-500 bg-red-500 text-white"
+                    ? "border-red-500 bg-red-500 text-white shadow-red-200"
                     : isCompleted || isActive
-                      ? "border-[hsl(258_46%_25%)] bg-[hsl(258_46%_25%)] text-white"
-                      : "border-gray-300 bg-white text-gray-400"
+                      ? "border-[hsl(258_46%_45%)] bg-gradient-to-br from-[hsl(258_46%_45%)] to-[hsl(258_46%_35%)] text-white shadow-[hsl(258_46%_85%)] scale-110"
+                      : "border-gray-300 bg-white text-gray-400 hover:border-gray-400"
                 }`}
               >
-                {isRejected ? <X className="h-4 w-4" /> : isCompleted ? <Check className="h-4 w-4" /> : index + 1}
+                {isRejected ? <X className="h-5 w-5" /> : isCompleted ? <Check className="h-5 w-5" /> : index + 1}
               </div>
             </div>
           );
         })}
       </div>
 
-      <div className="mt-3 mx-auto flex w-[80%] max-w-2xl justify-between text-xs font-medium text-gray-500 md:w-2/3">
-        {steps.map((label) => (
-          <div key={label} className="flex flex-1 justify-center text-center">
-            <span className="max-w-[7rem] text-xs md:text-sm">{label}</span>
-          </div>
-        ))}
+      <div className="mt-4 mx-auto flex w-[85%] max-w-2xl justify-between text-xs font-semibold text-gray-600 md:w-2/3">
+        {steps.map((label, index) => {
+          const isActive = index === normalizedStep;
+          return (
+            <div key={label} className="flex flex-1 justify-center text-center">
+              <span className={`max-w-[7rem] text-xs md:text-sm transition-all duration-300 ${
+                isActive ? 'text-[hsl(258_46%_35%)] font-bold scale-105' : 'text-gray-600'
+              }`}>
+                {label}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -106,46 +114,48 @@ const ProgressTracker: React.FC<ProgressTrackerProps> = ({ steps, currentStep, r
 
 const StatusHistory: React.FC<StatusHistoryProps> = ({ history }) => {
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {history.map((entry, index) => (
         <div
           key={`${entry.date}-${entry.time}-${index}`}
-          className="rounded-lg border border-[hsl(258_46%_25%/0.1)] bg-[hsl(258_46%_98%)] p-3"
+          className="rounded-xl border border-[hsl(258_46%_90%)] bg-gradient-to-br from-white to-[hsl(258_46%_97%)] p-5 shadow-md hover:shadow-lg transition-all duration-300 hover:border-[hsl(258_46%_80%)]"
         >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                {entry.date}
-              </span>
-              <p className="mt-1 text-sm font-semibold text-[hsl(258_46%_25%)]">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[hsl(258_46%_35%)] bg-[hsl(258_46%_95%)] px-2.5 py-1 rounded-lg border border-[hsl(258_46%_85%)]">
+                  {entry.date}
+                </span>
+              </div>
+              <p className="text-lg font-bold text-gray-900 mb-1.5">
                 {entry.status}
               </p>
-              <p className="text-sm text-[hsl(258_22%_45%)]">{entry.description}</p>
+              <p className="text-sm text-gray-600 leading-relaxed mb-3">{entry.description}</p>
               {/* Show related appointment time if available */}
               {entry.relatedTime && (
-                <p className="mt-2 text-xs text-[hsl(258_46%_25%)] bg-white border border-[hsl(258_46%_25%/0.2)] rounded px-2 py-1 inline-flex items-center gap-1">
-                  <Calendar className="h-3 w-3" />
-                  <span className="font-medium">
+                <div className="inline-flex items-center gap-2 text-xs font-medium text-[hsl(258_46%_30%)] bg-[hsl(258_46%_95%)] border border-[hsl(258_46%_85%)] rounded-lg px-3 py-2 hover:bg-[hsl(258_46%_92%)] transition-colors duration-200">
+                  <Calendar className="h-4 w-4 text-[hsl(258_46%_45%)]" />
+                  <span className="font-semibold">
                     {entry.status === 'Requested' ? 'Requested time:' : 'Appointment time:'}
                   </span> 
-                  {entry.relatedTime}
+                  <span className="font-bold">{entry.relatedTime}</span>
                   {entry.relatedEndTime && (
-                    <span> - {entry.relatedEndTime}</span>
+                    <><span className="font-bold">to</span><span className="font-bold">{entry.relatedEndTime}</span></>
                   )}
-                </p>
+                </div>
               )}
             </div>
-            <div className="hidden items-center gap-3 sm:flex sm:self-center">
-              <span className="hidden h-10 w-px rounded-full bg-[hsl(258_46%_25%/0.12)] sm:block" aria-hidden="true" />
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[hsl(258_46%_25%)]">
-                <Clock className="h-3.5 w-3.5" />
+            <div className="hidden items-center gap-4 sm:flex sm:self-start sm:pt-1">
+              <span className="hidden h-full w-px rounded-full bg-[hsl(258_46%_85%)] sm:block" aria-hidden="true" />
+              <div className="flex items-center gap-2.5 text-xs font-bold uppercase tracking-wider text-[hsl(258_46%_30%)] bg-[hsl(258_46%_95%)] border border-[hsl(258_46%_85%)] px-3 py-2 rounded-lg">
+                <Clock className="h-4 w-4 text-[hsl(258_46%_45%)]" />
                 <span>{entry.time}</span>
               </div>
             </div>
           </div>
-          <div className="mt-2 flex sm:hidden">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[hsl(258_46%_25%)]">
-              <Clock className="h-3.5 w-3.5" />
+          <div className="mt-3 flex sm:hidden">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[hsl(258_46%_30%)] bg-[hsl(258_46%_95%)] border border-[hsl(258_46%_85%)] px-3 py-2 rounded-lg">
+              <Clock className="h-4 w-4 text-[hsl(258_46%_45%)]" />
               <span>{entry.time}</span>
             </div>
           </div>
@@ -247,6 +257,7 @@ interface AppointmentSummaryProps {
   appointmentId?: string;
   onCancel?: () => void;
   onConfirm?: () => void; // NEW: Confirm appointment handler
+  onCreateNew?: () => void; // NEW: Create new appointment handler
 }
 
 const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
@@ -262,8 +273,13 @@ const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
   isLoading = false,
   appointmentId,
   onCancel,
-  onConfirm
+  onConfirm,
+  onCreateNew
 }) => {
+  // Cancel modal state
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+
   // Format date and time for display
   const formatDateTime = (isoString: string) => {
     const date = new Date(isoString);
@@ -281,102 +297,167 @@ const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
     return { dateStr, timeStr };
   };
 
-  const { dateStr, timeStr } = requestedStartTime 
-    ? formatDateTime(requestedStartTime) 
+  // Use the appropriate time based on status
+  const displayTime = status.toLowerCase() === 'booked' && bookedStartTime 
+    ? bookedStartTime 
+    : requestedStartTime;
+
+  const { dateStr, timeStr } = displayTime 
+    ? formatDateTime(displayTime) 
     : { dateStr: '', timeStr: '' };
 
-  // Status badge styling
+  // Status badge styling with enhanced colors
   const getStatusColor = (status: string) => {
     const statusLower = status.toLowerCase();
     switch (statusLower) {
       case 'requested':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
+        return 'bg-blue-100 text-blue-900 border-blue-300';
       case 'proposed':
-        return 'bg-purple-100 text-purple-800 border-purple-200';
+        return 'bg-purple-100 text-purple-900 border-purple-300';
       case 'booked':
-        return 'bg-green-100 text-green-800 border-green-200';
+        return 'bg-green-100 text-green-900 border-green-300';
       case 'arrived':
-        return 'bg-teal-100 text-teal-800 border-teal-200';
+        return 'bg-teal-100 text-teal-900 border-teal-300';
       case 'ongoing':
-        return 'bg-orange-100 text-orange-800 border-orange-200';
+        return 'bg-orange-100 text-orange-900 border-orange-300';
+      case 'completed':
+        return 'bg-emerald-100 text-emerald-900 border-emerald-300';
+      case 'cancelled':
+        return 'bg-red-100 text-red-900 border-red-300';
+      case 'rejected':
+        return 'bg-gray-100 text-gray-900 border-gray-300';
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+        return 'bg-gray-100 text-gray-900 border-gray-300';
     }
   };
 
   if (isLoading) {
     return (
-      <Card className="border border-[hsl(258_46%_25%/0.12)] shadow-sm">
-        <CardHeader>
+      <Card className="border border-gray-100 shadow-lg bg-white rounded-xl overflow-hidden animate-pulse">
+        <CardHeader className="bg-gradient-to-r from-blue-50 to-purple-50 pb-6">
           <div className="flex items-start justify-between">
-            <div className="space-y-2 flex-1">
-              <div className="h-6 w-48 bg-gray-200 rounded animate-pulse"></div>
-              <div className="h-4 w-32 bg-gray-200 rounded animate-pulse"></div>
+            <div className="space-y-3 flex-1">
+              <div className="h-7 w-56 bg-gray-200 rounded-lg"></div>
+              <div className="h-4 w-40 bg-gray-200 rounded"></div>
             </div>
-            <div className="h-6 w-20 bg-gray-200 rounded animate-pulse"></div>
+            <div className="h-8 w-24 bg-gray-200 rounded-full"></div>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="h-4 w-full bg-gray-200 rounded animate-pulse"></div>
-            <div className="h-4 w-3/4 bg-gray-200 rounded animate-pulse"></div>
-          </div>
+        <CardContent className="p-6 space-y-6">
+          <div className="h-16 w-full bg-gray-100 rounded-lg"></div>
+          <div className="h-16 w-full bg-gray-100 rounded-lg"></div>
+          <div className="h-24 w-full bg-gray-100 rounded-lg"></div>
         </CardContent>
       </Card>
     );
   }
 
   return (
-    <Card className="border border-[hsl(258_46%_25%/0.12)] shadow-sm bg-gradient-to-br from-blue-50 to-purple-50">
-      <CardHeader>
+    <Card className="border border-gray-100 shadow-lg bg-white rounded-xl overflow-hidden transition-all duration-300 hover:shadow-xl">
+      <CardHeader className="bg-gradient-to-r from-blue-50 via-purple-50 to-blue-50 pb-6 border-b border-gray-100">
         <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1 flex-1">
-            <CardTitle className="text-xl text-[hsl(258_46%_25%)]">
+          <div className="space-y-2 flex-1">
+            <CardTitle className="text-2xl font-bold text-gray-900 tracking-tight">
               Appointment Summary
             </CardTitle>
-            <CardDescription className="text-sm text-[hsl(258_22%_50%)]">
+            <CardDescription className="text-sm text-gray-600 leading-relaxed">
               Quick overview of your scheduled appointment
             </CardDescription>
           </div>
-          <div className={`px-3 py-1 rounded-full border text-xs font-semibold uppercase tracking-wide ${getStatusColor(status)}`}>
+          <div className={`px-4 py-2 rounded-full border-2 text-xs font-bold uppercase tracking-wider transition-all duration-200 ${getStatusColor(status)}`}>
             {status}
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Dentist Info */}
-        <div className="flex items-start gap-3">
-          <div className="flex-shrink-0 w-10 h-10 bg-[hsl(258_46%_25%)] rounded-full flex items-center justify-center">
-            <Stethoscope className="h-5 w-5 text-white" />
+      <CardContent className="p-6 space-y-6">
+        {/* Completed Appointment Banner - Compact at Top */}
+        {status.toLowerCase() === 'completed' && (
+          <div className="p-3 bg-gradient-to-r from-emerald-50 to-green-50 rounded-lg border border-emerald-200 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-full flex items-center justify-center">
+                  <Check className="h-4 w-4 text-white" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-emerald-900">Completed</p>
+                  <p className="text-[10px] text-emerald-700">Thank you for visiting!</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={onCreateNew}
+                  size="sm"
+                  className="bg-gradient-to-r from-[hsl(258_46%_45%)] to-[hsl(258_46%_35%)] hover:from-[hsl(258_46%_35%)] hover:to-[hsl(258_46%_25%)] text-white text-xs font-semibold py-1.5 px-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-300"
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Book New
+                </Button>
+                <Button
+                  onClick={async () => {
+                    try {
+                      const supabase = createClient();
+                      
+                      // Set is_active to false to dismiss the appointment
+                      const { error } = await supabase
+                        .from('appointments')
+                        .update({ is_active: false })
+                        .eq('appointment_id', appointmentId);
+                      
+                      if (error) {
+                        console.error('Error dismissing appointment:', error);
+                        return;
+                      }
+                      
+                      // Refresh to remove from UI
+                      window.location.reload();
+                    } catch (error) {
+                      console.error('Error dismissing:', error);
+                    }
+                  }}
+                  size="sm"
+                  variant="outline"
+                  className="border border-emerald-300 text-emerald-700 hover:bg-emerald-100 text-xs font-semibold py-1.5 px-3 rounded-lg transition-all duration-300"
+                >
+                  Dismiss
+                </Button>
+              </div>
+            </div>
           </div>
-          <div>
-            <p className="text-xs font-medium text-gray-600 uppercase tracking-wide">
+        )}
+
+        {/* Dentist Info */}
+        <div className="flex items-start gap-4 p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200">
+          <div className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-[hsl(258_46%_35%)] to-[hsl(258_46%_25%)] rounded-xl flex items-center justify-center shadow-md">
+            <Stethoscope className="h-6 w-6 text-white" />
+          </div>
+          <div className="flex-1">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
               Dentist
             </p>
-            <p className="text-sm font-bold text-[hsl(258_46%_25%)]">
+            <p className="text-base font-bold text-gray-900 mb-0.5">
               {doctorName}
             </p>
-            <p className="text-xs text-gray-600">
+            <p className="text-sm text-gray-600">
               {doctorSpecialization}
             </p>
           </div>
         </div>
 
         {/* Date & Time */}
-        <div className="flex items-start gap-3">
-          <div className="flex-shrink-0 w-10 h-10 bg-[hsl(258_46%_25%)] rounded-full flex items-center justify-center">
-            <Calendar className="h-5 w-5 text-white" />
+        <div className="flex items-start gap-4 p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200">
+          <div className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-[hsl(258_46%_35%)] to-[hsl(258_46%_25%)] rounded-xl flex items-center justify-center shadow-md">
+            <Calendar className="h-6 w-6 text-white" />
           </div>
           <div className="flex-1">
-            <p className="text-xs font-medium text-gray-600 uppercase tracking-wide">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
               {status.toLowerCase() === 'proposed' ? 'Requested Time' : 'Scheduled For'}
             </p>
-            <p className="text-sm font-bold text-[hsl(258_46%_25%)]">
+            <p className="text-base font-bold text-gray-900 mb-1">
               {dateStr}
             </p>
-            <p className="text-xs text-gray-600 flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {timeStr}
+            <p className="text-sm text-gray-700 flex items-center gap-1.5">
+              <Clock className="h-4 w-4 text-gray-500" />
+              <span className="font-medium">{timeStr}</span>
               {/* Show end time for booked appointments */}
               {status.toLowerCase() === 'booked' && bookedEndTime && (() => {
                 const endTime = new Date(bookedEndTime).toLocaleTimeString('en-US', {
@@ -384,7 +465,7 @@ const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
                   minute: '2-digit',
                   hour12: true
                 });
-                return <span className="font-medium"> - {endTime}</span>;
+                return <span className="font-medium"> to {endTime}</span>;
               })()}
             </p>
           </div>
@@ -409,100 +490,253 @@ const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
             minute: '2-digit',
             hour12: true
           }) : null;
-          
-          // Different colors based on whether times match
-          const bgColor = timesMatch ? 'bg-green-50' : 'bg-purple-50';
-          const borderColor = timesMatch ? 'border-green-200' : 'border-purple-200';
-          const iconBgColor = timesMatch ? 'bg-green-600' : 'bg-purple-600';
-          const labelColor = timesMatch ? 'text-green-900' : 'text-purple-900';
-          const dateColor = timesMatch ? 'text-green-900' : 'text-purple-900';
-          const timeColor = timesMatch ? 'text-green-700' : 'text-purple-700';
-          const messageColor = timesMatch ? 'text-green-600' : 'text-purple-600';
-          
-          return (
-            <div className={`flex items-start gap-3 ${bgColor} border ${borderColor} rounded-lg p-3`}>
-              <div className={`flex-shrink-0 w-10 h-10 ${iconBgColor} rounded-full flex items-center justify-center`}>
-                <Calendar className="h-5 w-5 text-white" />
-              </div>
-              <div className="flex-1">
-                <p className={`text-xs font-medium ${labelColor} uppercase tracking-wide`}>
-                  {label}
-                </p>
-                <p className={`text-sm font-bold ${dateColor}`}>
-                  {propDateStr}
-                </p>
-                <p className={`text-xs ${timeColor} flex items-center gap-1`}>
-                  <Clock className="h-3 w-3" />
-                  {propTimeStr}
-                  {propEndTimeStr && (
-                    <span className="font-medium"> - {propEndTimeStr}</span>
-                  )}
-                </p>
-                <p className={`text-xs ${messageColor} mt-2`}>
-                  {message}
-                </p>
-              </div>
-            </div>
-          );
-        })()}
 
-        {/* Confirm Button - Only show when status is 'proposed' */}
-        {status.toLowerCase() === 'proposed' && onConfirm && (() => {
-          const timesMatch = requestedStartTime && proposedStartTime && 
-            new Date(requestedStartTime).getTime() === new Date(proposedStartTime).getTime();
-          
-          const buttonText = timesMatch ? 'Confirm Appointment' : 'Accept Proposed Time';
-          const buttonDescription = timesMatch 
-            ? 'Click to confirm your appointment at your requested time'
-            : 'Click to accept the dentist\'s proposed time';
+          const buttonText = timesMatch ? 'Confirm' : 'Accept';
           
           return (
-            <div className="pt-2">
-              <Button
-                onClick={onConfirm}
-                className="w-full bg-[hsl(258_46%_45%)] hover:bg-[hsl(258_46%_35%)] text-white font-semibold"
-              >
-                <Check className="h-4 w-4 mr-2" />
-                {buttonText}
-              </Button>
-              <p className="text-xs text-gray-500 text-center mt-2">
-                {buttonDescription}
-              </p>
+            <div className={`p-5 rounded-xl border-2 transition-all duration-300 hover:shadow-md ${
+              timesMatch 
+                ? 'bg-gradient-to-br from-green-50 to-emerald-50 border-green-200 hover:border-green-300' 
+                : 'bg-gradient-to-br from-purple-50 to-indigo-50 border-purple-200 hover:border-purple-300'
+            }`}>
+              <div className="flex items-start gap-4">
+                <div className={`flex-shrink-0 w-12 h-12 rounded-xl flex items-center justify-center shadow-md transition-transform duration-300 hover:scale-110 ${
+                  timesMatch ? 'bg-gradient-to-br from-green-500 to-green-600' : 'bg-gradient-to-br from-purple-500 to-purple-600'
+                }`}>
+                  {timesMatch ? (
+                    <CheckCircle2 className="h-6 w-6 text-white" />
+                  ) : (
+                    <Clock className="h-6 w-6 text-white" />
+                  )}
+                </div>
+                <div className="flex-1">
+                  <p className={`text-xs font-bold uppercase tracking-wider mb-2 ${
+                    timesMatch ? 'text-green-700' : 'text-purple-700'
+                  }`}>
+                    {label}
+                  </p>
+                  <div className="space-y-2">
+                    <p className={`text-base font-bold ${timesMatch ? 'text-green-900' : 'text-purple-900'}`}>
+                      {propDateStr}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <div className={`px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 ${
+                        timesMatch 
+                          ? 'bg-green-100 text-green-800 border border-green-200' 
+                          : 'bg-purple-100 text-purple-800 border border-purple-200'
+                      }`}>
+                        <Clock className="h-4 w-4" />
+                        {propTimeStr}
+                        {propEndTimeStr && (
+                          <> to {propEndTimeStr}</>
+                        )}
+                      </div>
+                    </div>
+                    <p className={`text-xs font-medium leading-relaxed ${
+                      timesMatch ? 'text-green-600' : 'text-purple-600'
+                    }`}>
+                      {message}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Confirm Button - Only inside the card with proper divider */}
+              {onConfirm && (
+                <>
+                  <div className={`my-4 h-px ${timesMatch ? 'bg-green-200' : 'bg-purple-200'}`} />
+                  <div className="flex justify-end">
+                    <Button
+                      onClick={onConfirm}
+                      className={`w-full sm:w-auto bg-gradient-to-r font-semibold py-2.5 px-6 rounded-xl shadow-md hover:shadow-lg transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] ${
+                        timesMatch
+                          ? 'from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white'
+                          : 'from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white'
+                      }`}
+                    >
+                      {buttonText}
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           );
         })()}
 
         {/* Concern */}
-        <div className="flex items-start gap-3">
-          <div className="flex-shrink-0 w-10 h-10 bg-[hsl(258_46%_25%)] rounded-full flex items-center justify-center">
-            <FileText className="h-5 w-5 text-white" />
+        <div className="flex items-start gap-4 p-5 bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl border border-amber-200 hover:bg-gradient-to-br hover:from-amber-100 hover:to-orange-100 transition-all duration-300">
+          <div className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl flex items-center justify-center shadow-md">
+            <FileText className="h-6 w-6 text-white" />
           </div>
           <div className="flex-1">
-            <p className="text-xs font-medium text-gray-600 uppercase tracking-wide">
+            <p className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-2">
               Your Concern
             </p>
-            <p className="text-sm text-[hsl(258_46%_25%)] mt-1 leading-relaxed">
+            <p className="text-sm text-gray-800 leading-relaxed font-medium">
               {concern}
             </p>
           </div>
         </div>
+
+        {/* Status Progression Buttons - For testing/clinic workflow */}
+        {status.toLowerCase() === 'booked' && (
+          <div className="p-4 bg-gradient-to-br from-teal-50 to-cyan-50 rounded-xl border border-teal-200">
+            <p className="text-xs font-bold text-teal-700 uppercase tracking-wider mb-3">
+              Update Appointment Status
+            </p>
+            <Button
+              onClick={async () => {
+                try {
+                  const supabase = createClient();
+                  const { error } = await supabase
+                    .from('appointments')
+                    .update({ status: 'arrived' })
+                    .eq('appointment_id', appointmentId);
+                  
+                  if (error) throw error;
+                  window.location.reload();
+                } catch (error) {
+                  console.error('Error updating status:', error);
+                }
+              }}
+              className="w-full bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-700 hover:to-teal-800 text-white font-semibold py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all duration-300"
+            >
+              Mark as Arrived
+            </Button>
+          </div>
+        )}
+
+        {status.toLowerCase() === 'arrived' && (
+          <div className="p-4 bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl border border-orange-200">
+            <p className="text-xs font-bold text-orange-700 uppercase tracking-wider mb-3">
+              Update Appointment Status
+            </p>
+            <Button
+              onClick={async () => {
+                try {
+                  const supabase = createClient();
+                  const { error } = await supabase
+                    .from('appointments')
+                    .update({ status: 'ongoing' })
+                    .eq('appointment_id', appointmentId);
+                  
+                  if (error) throw error;
+                  window.location.reload();
+                } catch (error) {
+                  console.error('Error updating status:', error);
+                }
+              }}
+              className="w-full bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800 text-white font-semibold py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all duration-300"
+            >
+              Start Treatment (Ongoing)
+            </Button>
+          </div>
+        )}
+
+        {status.toLowerCase() === 'ongoing' && (
+          <div className="p-4 bg-gradient-to-br from-emerald-50 to-green-50 rounded-xl border border-emerald-200">
+            <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-3">
+              Update Appointment Status
+            </p>
+            <Button
+              onClick={async () => {
+                try {
+                  const supabase = createClient();
+                  const { error } = await supabase
+                    .from('appointments')
+                    .update({ status: 'completed' })
+                    .eq('appointment_id', appointmentId);
+                  
+                  if (error) throw error;
+                  window.location.reload();
+                } catch (error) {
+                  console.error('Error updating status:', error);
+                }
+              }}
+              className="w-full bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-semibold py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all duration-300"
+            >
+              Complete Appointment
+            </Button>
+          </div>
+        )}
 
         {/* Cancel Button - Only show if appointment can be cancelled */}
         {status.toLowerCase() !== 'cancelled' && 
          status.toLowerCase() !== 'completed' && 
          status.toLowerCase() !== 'rejected' && 
          onCancel && (
-          <div className="pt-2 border-t border-gray-200">
+          <div className="flex justify-end pt-6 border-t border-gray-100 mt-2">
             <Button
-              variant="outline"
-              onClick={onCancel}
-              className="w-full border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
+              onClick={() => setIsCancelModalOpen(true)}
+              className="bg-red-600 hover:bg-red-700 text-white font-semibold px-6 py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98]"
             >
               Cancel Appointment
             </Button>
           </div>
         )}
       </CardContent>
+
+      {/* Cancel Confirmation Modal */}
+      <Dialog open={isCancelModalOpen} onOpenChange={setIsCancelModalOpen}>
+        <DialogContent className="sm:max-w-md bg-white rounded-2xl shadow-2xl border-0">
+          <DialogHeader>
+            <div className="flex items-center gap-4 mb-3">
+              <div className="flex-shrink-0 w-14 h-14 bg-gradient-to-br from-red-100 to-red-50 rounded-2xl flex items-center justify-center shadow-sm">
+                <AlertTriangle className="h-7 w-7 text-red-600" />
+              </div>
+              <DialogTitle className="text-2xl font-bold text-gray-900">
+                Cancel Appointment?
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-gray-600 text-base leading-relaxed pt-3 pl-1">
+              Are you sure you want to cancel your appointment with <span className="font-bold text-gray-900">{doctorName}</span>?
+              <br />
+              <br />
+              <span className="text-sm text-gray-500 font-medium">
+                This action cannot be undone. You will need to create a new appointment if you wish to reschedule.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          
+          <DialogFooter className="flex-col sm:flex-row gap-3 pt-6">
+            <Button
+              variant="outline"
+              onClick={() => setIsCancelModalOpen(false)}
+              disabled={isCancelling}
+              className="w-full sm:w-auto border-2 border-gray-200 hover:bg-gray-50 hover:border-gray-300 font-semibold px-6 py-2.5 rounded-xl transition-all duration-200"
+            >
+              Keep Appointment
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                setIsCancelling(true);
+                try {
+                  if (onCancel) {
+                    await onCancel();
+                  }
+                  setIsCancelModalOpen(false);
+                } catch (error) {
+                  console.error('Error cancelling:', error);
+                } finally {
+                  setIsCancelling(false);
+                }
+              }}
+              disabled={isCancelling}
+              className="w-full sm:w-auto bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white font-semibold px-6 py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            >
+              {isCancelling ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Cancelling...
+                </div>
+              ) : (
+                'Yes, Cancel Appointment'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 };
@@ -679,7 +913,8 @@ export default function AppointmentsPatientPage() {
           )
         `)
         .eq('patient_id', patientData.patient_id)
-        .in('status', ['requested', 'proposed', 'booked', 'arrived', 'ongoing'])
+        .eq('is_active', true)
+        .in('status', ['requested', 'proposed', 'booked', 'arrived', 'ongoing', 'completed'])
         .order('created_at', { ascending: false })
         .limit(1);
 
@@ -1083,11 +1318,6 @@ export default function AppointmentsPatientPage() {
   const handleCancelAppointment = async () => {
     if (!activeAppointment?.appointmentId) return;
 
-    // Confirm cancellation
-    if (!confirm('Are you sure you want to cancel this appointment? This action cannot be undone.')) {
-      return;
-    }
-
     try {
       const supabase = createClient();
 
@@ -1195,49 +1425,57 @@ export default function AppointmentsPatientPage() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pb-8">
       {/* Alert Notification */}
       {alert?.show && (
-        <Alert variant={alert.variant}>
+        <Alert 
+          variant={alert.variant} 
+          className="rounded-xl border-2 shadow-md animate-in slide-in-from-top-5 duration-300"
+        >
           {alert.message}
         </Alert>
       )}
 
-      <header className="space-y-1">
-        <h2 className="text-2xl font-bold text-[hsl(258_46%_25%)]">Patient Appointments</h2>
-        <p className="text-[hsl(258_22%_50%)]">
+      <header className="space-y-2">
+        <h2 className="text-3xl font-bold text-gray-900 tracking-tight">Patient Appointments</h2>
+        <p className="text-base text-gray-600">
           Review the status of your latest appointment activity.
         </p>
       </header>
 
       {/* Appointment Summary - Only show when there's an active appointment */}
       {activeAppointment && activeAppointment.doctorName && (
-        <AppointmentSummary
-          doctorName={activeAppointment.doctorName}
-          doctorSpecialization={activeAppointment.doctorSpecialization || 'General Dentistry'}
-          requestedStartTime={activeAppointment.requestedStartTime || ''}
-          proposedStartTime={activeAppointment.proposedStartTime}
-          proposedEndTime={activeAppointment.proposedEndTime}
-          bookedStartTime={activeAppointment.bookedStartTime}
-          bookedEndTime={activeAppointment.bookedEndTime}
-          status={activeAppointment.status || 'requested'}
-          concern={activeAppointment.concern || 'No concern specified'}
-          isLoading={isLoadingAppointment}
-          appointmentId={activeAppointment.appointmentId}
-          onCancel={handleCancelAppointment}
-          onConfirm={handleAcceptProposedAppointment}
-        />
+        <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <AppointmentSummary
+            doctorName={activeAppointment.doctorName}
+            doctorSpecialization={activeAppointment.doctorSpecialization || 'General Dentistry'}
+            requestedStartTime={activeAppointment.requestedStartTime || ''}
+            proposedStartTime={activeAppointment.proposedStartTime}
+            proposedEndTime={activeAppointment.proposedEndTime}
+            bookedStartTime={activeAppointment.bookedStartTime}
+            bookedEndTime={activeAppointment.bookedEndTime}
+            status={activeAppointment.status || 'requested'}
+            concern={activeAppointment.concern || 'No concern specified'}
+            isLoading={isLoadingAppointment}
+            appointmentId={activeAppointment.appointmentId}
+            onCancel={handleCancelAppointment}
+            onConfirm={handleAcceptProposedAppointment}
+            onCreateNew={handleOpenModal}
+          />
+        </section>
       )}
 
-      <AppointmentCard
-        title="Upcoming Appointment"
-        {...appointmentCardData}
-        milestoneMessages={milestoneMessages}
-        canCreate
-        onCreate={handleOpenModal}
-        emptyStateMessage="You don't have an active appointment request. Start a new one to secure your slot."
-        isLoading={isLoadingAppointment}
-      />
+      <section className="animate-in fade-in slide-in-from-bottom-5 duration-500">
+        <AppointmentCard
+          title="Upcoming Appointment"
+          {...appointmentCardData}
+          milestoneMessages={milestoneMessages}
+          canCreate
+          onCreate={handleOpenModal}
+          emptyStateMessage="You don't have an active appointment request. Start a new one to secure your slot."
+          isLoading={isLoadingAppointment}
+        />
+      </section>
 
       <DoctorSelectionModal
         open={isDoctorModalOpen}
