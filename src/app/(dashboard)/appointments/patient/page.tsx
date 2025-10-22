@@ -7,6 +7,7 @@ import { Alert } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Check, Clock, Plus, X, Stethoscope, Calendar, FileText, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { createClient } from '@/lib/supabase/client';
+import { StatusFlowGuide } from '@/components/StatusFlowGuide';
 import DoctorSelectionModal from './DoctorSelectionModal';
 import ScheduleSelectionModal from './ScheduleSelectionModal';
 import AppointmentConfirmationModal from './AppointmentConfirmationModal';
@@ -51,16 +52,29 @@ const ProgressTracker: React.FC<ProgressTrackerProps> = ({ steps, currentStep, r
   const normalizedStep = Math.max(0, Math.min(currentStep, totalSteps));
   const flowComplete = normalizedStep >= totalSteps;
   const rejectedSet = useMemo(() => new Set(rejectedStepIndices), [rejectedStepIndices]);
+  
+  // If there's a rejected step, find the last completed step before it
+  const hasRejection = rejectedStepIndices.length > 0;
+  const lastCompletedBeforeRejection = hasRejection ? Math.min(...rejectedStepIndices) - 1 : -1;
 
   return (
     <div className="w-full py-2">
       <div className="mx-auto flex w-[85%] max-w-2xl items-center justify-between md:w-2/3">
         {steps.map((_, index) => {
-          const isCompleted = normalizedStep > index;
-          const isActive = !flowComplete && index === normalizedStep;
-          const hasCompletedLeft = normalizedStep >= index;
-          const hasCompletedRight = normalizedStep > index;
           const isRejected = rejectedSet.has(index);
+          
+          // For terminated flows (rejected/cancelled), show checkmarks up to the last completed step
+          const isCompleted = hasRejection 
+            ? index <= lastCompletedBeforeRejection 
+            : normalizedStep > index;
+          
+          const isActive = !flowComplete && !hasRejection && index === normalizedStep;
+          const hasCompletedLeft = hasRejection 
+            ? index <= lastCompletedBeforeRejection 
+            : normalizedStep >= index;
+          const hasCompletedRight = hasRejection 
+            ? index < lastCompletedBeforeRejection 
+            : normalizedStep > index;
 
           return (
             <div key={`tracker-circle-${index}`} className="relative flex flex-1 items-center justify-center">
@@ -614,88 +628,6 @@ const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
           </div>
         </div>
 
-        {/* Status Progression Buttons - For testing/clinic workflow */}
-        {status.toLowerCase() === 'booked' && (
-          <div className="p-4 bg-gradient-to-br from-teal-50 to-cyan-50 rounded-xl border border-teal-200">
-            <p className="text-xs font-bold text-teal-700 uppercase tracking-wider mb-3">
-              Update Appointment Status
-            </p>
-            <Button
-              onClick={async () => {
-                try {
-                  const supabase = createClient();
-                  const { error } = await supabase
-                    .from('appointments')
-                    .update({ status: 'arrived' })
-                    .eq('appointment_id', appointmentId);
-                  
-                  if (error) throw error;
-                  window.location.reload();
-                } catch (error) {
-                  console.error('Error updating status:', error);
-                }
-              }}
-              className="w-full bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-700 hover:to-teal-800 text-white font-semibold py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all duration-300"
-            >
-              Mark as Arrived
-            </Button>
-          </div>
-        )}
-
-        {status.toLowerCase() === 'arrived' && (
-          <div className="p-4 bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl border border-orange-200">
-            <p className="text-xs font-bold text-orange-700 uppercase tracking-wider mb-3">
-              Update Appointment Status
-            </p>
-            <Button
-              onClick={async () => {
-                try {
-                  const supabase = createClient();
-                  const { error } = await supabase
-                    .from('appointments')
-                    .update({ status: 'ongoing' })
-                    .eq('appointment_id', appointmentId);
-                  
-                  if (error) throw error;
-                  window.location.reload();
-                } catch (error) {
-                  console.error('Error updating status:', error);
-                }
-              }}
-              className="w-full bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800 text-white font-semibold py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all duration-300"
-            >
-              Start Treatment (Ongoing)
-            </Button>
-          </div>
-        )}
-
-        {status.toLowerCase() === 'ongoing' && (
-          <div className="p-4 bg-gradient-to-br from-emerald-50 to-green-50 rounded-xl border border-emerald-200">
-            <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-3">
-              Update Appointment Status
-            </p>
-            <Button
-              onClick={async () => {
-                try {
-                  const supabase = createClient();
-                  const { error } = await supabase
-                    .from('appointments')
-                    .update({ status: 'completed' })
-                    .eq('appointment_id', appointmentId);
-                  
-                  if (error) throw error;
-                  window.location.reload();
-                } catch (error) {
-                  console.error('Error updating status:', error);
-                }
-              }}
-              className="w-full bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-semibold py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all duration-300"
-            >
-              Complete Appointment
-            </Button>
-          </div>
-        )}
-
         {/* Cancel Button - Only show if appointment can be cancelled */}
         {status.toLowerCase() !== 'cancelled' && 
          status.toLowerCase() !== 'completed' && 
@@ -962,12 +894,18 @@ export default function AppointmentsPatientPage() {
       }
 
       if (!appointments || appointments.length === 0) {
+        console.log('No appointments found with is_active=true');
         setActiveAppointment(null);
         setIsLoadingAppointment(false);
         return;
       }
 
       const appointment = appointments[0];
+      console.log('Found active appointment:', {
+        id: appointment.appointment_id,
+        status: appointment.status,
+        is_active: appointment.is_active
+      });
       
       // Fetch doctor's name from users table
       let doctorName = 'Doctor';
@@ -1420,64 +1358,13 @@ export default function AppointmentsPatientPage() {
   const handleCancelAppointment = async () => {
     if (!activeAppointment?.appointmentId) return;
 
-    setIsCancelling(true);
-
     try {
       const supabase = createClient();
 
-      // Get current user for history record
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) {
-        throw new Error('Authentication required');
-      }
-
-      // Get user_id from auth_id
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('user_id')
-        .eq('auth_id', user.id)
-        .single();
-
-      if (userError || !userData) {
-        throw new Error('User not found');
-      }
-
-      // Fetch appointment to get the correct time to snapshot
-      const { data: appointmentData, error: fetchError } = await supabase
-        .from('appointments')
-        .select('requested_start_time')
-        .eq('appointment_id', activeAppointment.appointmentId)
-        .single();
-
-      if (fetchError) throw fetchError;
-
-      // Insert status history FIRST (manual insertion for cancelled status)
-      const { error: historyError } = await supabase
-        .from('appointment_status_history')
-        .insert({
-          appointment_id: activeAppointment.appointmentId,
-          status: 'cancelled',
-          changed_by_user_id: userData.user_id,
-          notes: 'Your appointment has been cancelled.',
-          feedback: null, // No custom feedback from patient cancel
-          related_time: appointmentData?.requested_start_time,
-          related_end_time: null
-        });
-
-      if (historyError) {
-        console.error('Error inserting status history:', historyError);
-        console.error('History error details:', JSON.stringify(historyError, null, 2));
-        throw historyError;
-      }
-
-      // Update appointment status with feedback_type to signal trigger to skip
+      // Update appointment status to cancelled
       const { error } = await supabase
         .from('appointments')
-        .update({ 
-          status: 'cancelled',
-          feedback_type: 'cancelled', // Signal to trigger to skip auto-insert
-          updated_at: new Date().toISOString()
-        })
+        .update({ status: 'cancelled' })
         .eq('appointment_id', activeAppointment.appointmentId);
 
       if (error) {
@@ -1491,9 +1378,7 @@ export default function AppointmentsPatientPage() {
         message: 'Appointment cancelled successfully.'
       });
 
-      setIsCancelModalOpen(false);
-
-      // Refresh to update UI (will show as cancelled with red banner)
+      // Refresh to update UI (will show as cancelled or remove from active)
       await fetchActiveAppointment();
 
       // Auto-dismiss
@@ -1512,8 +1397,6 @@ export default function AppointmentsPatientPage() {
       setTimeout(() => {
         setAlert(null);
       }, 5000);
-    } finally {
-      setIsCancelling(false);
     }
   };
 
@@ -1593,11 +1476,14 @@ export default function AppointmentsPatientPage() {
         </Alert>
       )}
 
-      <header className="space-y-2">
-        <h2 className="text-3xl font-bold text-gray-900 tracking-tight">Patient Appointments</h2>
-        <p className="text-base text-gray-600">
-          Review the status of your latest appointment activity.
-        </p>
+      <header className="flex items-center justify-between">
+        <div className="space-y-2">
+          <h2 className="text-3xl font-bold text-gray-900 tracking-tight">Patient Appointments</h2>
+          <p className="text-base text-gray-600">
+            Review the status of your latest appointment activity.
+          </p>
+        </div>
+        <StatusFlowGuide variant="patient" />
       </header>
 
       {/* Appointment Summary - Only show when there's an active appointment */}

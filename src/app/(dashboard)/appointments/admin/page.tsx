@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { NewAppointmentModal } from "@/components/NewAppointmentModal";
 import RescheduleModal from "@/components/RescheduleModal";
+import { StatusFlowGuide } from "@/components/StatusFlowGuide";
 import { createClient } from "@/lib/supabase/client";
 
 interface Notification {
@@ -1057,7 +1058,10 @@ export default function AdminAppointmentsPage() {
           .eq('appointment_id', appointmentId)
           .single();
 
-        if (fetchError) throw fetchError;
+        if (fetchError) {
+          console.error('Error fetching appointment:', fetchError);
+          throw fetchError;
+        }
 
         // Insert status history BEFORE updating appointment (for reject/cancel with custom notes)
         const defaultNotes: Record<string, string> = {
@@ -1068,6 +1072,15 @@ export default function AdminAppointmentsPage() {
         const historyNotes = defaultNotes[newStatus] || `Your appointment status has been updated.`;
         // ✅ FIX: Don't combine - store separately!
 
+        console.log('Attempting to insert history:', {
+          appointment_id: appointmentId,
+          status: newStatus,
+          changed_by_user_id: userData.user_id,
+          notes: historyNotes,
+          feedback: reason?.trim() || null,
+          related_time: appointmentData?.requested_start_time
+        });
+
         const { error: historyError } = await supabase
           .from('appointment_status_history')
           .insert({
@@ -1075,14 +1088,19 @@ export default function AdminAppointmentsPage() {
             status: newStatus,
             changed_by_user_id: userData.user_id,
             notes: historyNotes, // ✅ Only default message
-            feedback: reason?.trim() || null, // ✅ Only custom feedback - YES, saves to feedback column!
+            feedback: reason?.trim() || null, // ✅ Only custom feedback
             related_time: appointmentData?.requested_start_time,
             related_end_time: null
+            // Don't set changed_at - let database handle it with DEFAULT now()
           });
 
         if (historyError) {
-          console.error('Error inserting status history:', historyError);
-          console.error('History error details:', JSON.stringify(historyError, null, 2));
+          console.error('Error inserting status history:', {
+            message: historyError.message,
+            details: historyError.details,
+            hint: historyError.hint,
+            code: historyError.code
+          });
           throw historyError; // Don't continue if history insert fails
         }
       }
@@ -1145,10 +1163,14 @@ export default function AdminAppointmentsPage() {
 
       // Refresh appointments to get latest data
       fetchAppointments();
-    } catch (error) {
-      console.error('Error updating appointment status:', error);
-      console.error('Error type:', typeof error);
-      console.error('Error keys:', error ? Object.keys(error) : 'null');
+    } catch (error: any) {
+      console.error('Error updating appointment status:', {
+        message: error?.message || 'Unknown error',
+        details: error?.details || 'No details',
+        hint: error?.hint || 'No hint',
+        code: error?.code || 'No code',
+        full: error
+      });
       showNotification('error', 'Error', 'Failed to update appointment status. Please try again.');
     }
   };
@@ -1178,6 +1200,7 @@ export default function AdminAppointmentsPage() {
     // Capture actionReasonText BEFORE clearing it
     const feedback = actionReasonText.trim();
     
+    // Note: reject and cancel are handled by applyReasonAction(), not here
     if (pendingAction.type === "accept") {
       handleStatusChange(apt.id, "proposed", feedback);
     } else if (pendingAction.type === "arrive") {
@@ -1186,10 +1209,6 @@ export default function AdminAppointmentsPage() {
       handleStatusChange(apt.id, "ongoing", feedback);
     } else if (pendingAction.type === "complete") {
       handleStatusChange(apt.id, "completed", feedback);
-    } else if (pendingAction.type === "cancel") {
-      handleStatusChange(apt.id, "cancelled", feedback);
-    } else if (pendingAction.type === "reject") {
-      handleStatusChange(apt.id, "rejected", feedback);
     }
     setIsConfirmDialogOpen(false);
     setActionReasonText("");
@@ -1493,6 +1512,7 @@ export default function AdminAppointmentsPage() {
           <h2 className="text-2xl font-bold text-[hsl(258_46%_25%)]">Appointments</h2>
           <p className="text-[hsl(258_22%_50%)]">Manage your dental appointments</p>
         </div>
+        <StatusFlowGuide variant="admin" />
       </div>
 
       {/* Quick Stats Header */}
@@ -2774,7 +2794,7 @@ export default function AdminAppointmentsPage() {
         </Dialog>
       )}
 
-      {/* Confirm Action Dialog with Feedback */}
+      {/* Confirm Action Dialog - Simple confirmation for arrived/ongoing/complete */}
       <Dialog open={isConfirmDialogOpen} onOpenChange={setIsConfirmDialogOpen}>
         <DialogContent className="sm:max-w-[480px] bg-white">
           <DialogHeader>
@@ -2789,22 +2809,11 @@ export default function AdminAppointmentsPage() {
           </DialogHeader>
           
           <div className="space-y-4">
-            {/* Note to Patient Field */}
-            <div>
-              <label className="text-sm font-medium text-[hsl(258_46%_25%)] mb-2 block">
-                Note to Patient (Optional)
-              </label>
-              <textarea
-                value={actionReasonText}
-                onChange={(e) => setActionReasonText(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-[hsl(258_46%_25%)] placeholder:text-[hsl(258_22%_50%)]"
-                rows={3}
-                placeholder="Add any notes that the patient should see..."
-              />
-              <p className="text-xs text-[hsl(258_22%_50%)] mt-1">
-                This note will be visible to the patient in their appointment history.
-              </p>
-            </div>
+            <p className="text-sm text-[hsl(258_22%_50%)]">
+              {pendingAction.type === "arrive" && "Confirm that the patient has arrived at the clinic."}
+              {pendingAction.type === "ongoing" && "Confirm that the treatment has started."}
+              {pendingAction.type === "complete" && "Confirm that the appointment has been completed successfully."}
+            </p>
           </div>
 
           <div className="flex justify-end gap-2 pt-4">
