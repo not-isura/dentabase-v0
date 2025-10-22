@@ -353,8 +353,24 @@ export default function AdminAppointmentsPage() {
         return;
       }
 
-      // Fetch appointments with patient and doctor details
-      const { data: appointmentsData, error: appointmentsError } = await supabase
+      // Get current user's role and related IDs
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('user_id, role')
+        .eq('auth_id', user.id)
+        .single();
+
+      if (userError || !userData) {
+        console.error('User data fetch error:', userError);
+        setError('Failed to load user data');
+        setIsLoadingAppointments(false);
+        return;
+      }
+
+      console.log('Current user role:', userData.role);
+
+      // Build base query
+      let query = supabase
         .from('appointments')
         .select(`
           appointment_id,
@@ -389,6 +405,7 @@ export default function AdminAppointmentsPage() {
           doctors (
             doctor_id,
             specialization,
+            user_id,
             users (
               first_name,
               middle_name,
@@ -396,8 +413,49 @@ export default function AdminAppointmentsPage() {
             )
           )
         `)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
+        .eq('is_active', true);
+
+      // Apply role-based filtering
+      if (userData.role === 'dentist') {
+        // Dentist can only see their own patients
+        const { data: doctorData, error: doctorError } = await supabase
+          .from('doctors')
+          .select('doctor_id')
+          .eq('user_id', userData.user_id)
+          .single();
+
+        if (doctorError || !doctorData) {
+          console.error('Doctor data fetch error:', doctorError);
+          setError('Failed to load doctor data');
+          setIsLoadingAppointments(false);
+          return;
+        }
+
+        console.log('Filtering by doctor_id:', doctorData.doctor_id);
+        query = query.eq('doctor_id', doctorData.doctor_id);
+
+      } else if (userData.role === 'staff') {
+        // Staff can only see their doctor's patients
+        const { data: staffData, error: staffError } = await supabase
+          .from('staff')
+          .select('doctor_id')
+          .eq('user_id', userData.user_id)
+          .single();
+
+        if (staffError || !staffData) {
+          console.error('Staff data fetch error:', staffError);
+          setError('Failed to load staff data');
+          setIsLoadingAppointments(false);
+          return;
+        }
+
+        console.log('Filtering by staff\'s doctor_id:', staffData.doctor_id);
+        query = query.eq('doctor_id', staffData.doctor_id);
+      }
+      // Admin can see all appointments (no additional filter)
+
+      // Execute query
+      const { data: appointmentsData, error: appointmentsError } = await query.order('created_at', { ascending: false });
 
       console.log('Appointments data:', appointmentsData);
       console.log('Appointments error:', appointmentsError);
