@@ -331,6 +331,9 @@ const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
     }
   };
 
+  // Display "To Confirm" for proposed status in patient UI
+  const displayStatus = status.toLowerCase() === 'proposed' ? 'To Confirm' : status;
+
   if (isLoading) {
     return (
       <Card className="border border-gray-100 shadow-lg bg-white rounded-xl overflow-hidden animate-pulse">
@@ -365,7 +368,7 @@ const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
             </CardDescription>
           </div>
           <div className={`px-4 py-2 rounded-full border-2 text-xs font-bold uppercase tracking-wider transition-all duration-200 ${getStatusColor(status)}`}>
-            {status}
+            {displayStatus}
           </div>
         </div>
       </CardHeader>
