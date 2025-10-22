@@ -2734,40 +2734,38 @@ export default function AdminAppointmentsPage() {
       <Dialog open={isQuickWeekViewOpen} onOpenChange={setIsQuickWeekViewOpen}>
         <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-hidden bg-white shadow-lg flex flex-col">
           <DialogHeader className="border-b pb-4">
-            <div className="flex items-center justify-between">
-              <DialogTitle className="flex items-center text-[hsl(258_46%_25%)]">
-                <CalendarIcon className="mr-2 h-5 w-5" />
-                Weekly Schedule - Quick View
-              </DialogTitle>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const newStart = new Date(quickViewWeekStart);
-                    newStart.setDate(newStart.getDate() - 7);
-                    setQuickViewWeekStart(newStart);
-                  }}
-                  className="h-8 w-8 p-0 border-gray-300 hover:bg-purple-50"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <span className="text-sm font-semibold text-[hsl(258_46%_25%)] min-w-[180px] text-center">
-                  {formatDateRange(quickViewWeekStart)}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const newStart = new Date(quickViewWeekStart);
-                    newStart.setDate(newStart.getDate() + 7);
-                    setQuickViewWeekStart(newStart);
-                  }}
-                  className="h-8 w-8 p-0 border-gray-300 hover:bg-purple-50"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
+            <DialogTitle className="flex items-center text-[hsl(258_46%_25%)] mb-3">
+              <CalendarIcon className="mr-2 h-5 w-5" />
+              Weekly Schedule - Quick View
+            </DialogTitle>
+            <div className="flex items-center justify-center gap-2 pr-6">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const newStart = new Date(quickViewWeekStart);
+                  newStart.setDate(newStart.getDate() - 7);
+                  setQuickViewWeekStart(newStart);
+                }}
+                className="h-8 w-8 p-0 border-gray-300 hover:bg-purple-50"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-sm font-semibold text-[hsl(258_46%_25%)] min-w-[180px] text-center">
+                {formatDateRange(quickViewWeekStart)}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const newStart = new Date(quickViewWeekStart);
+                  newStart.setDate(newStart.getDate() + 7);
+                  setQuickViewWeekStart(newStart);
+                }}
+                className="h-8 w-8 p-0 border-gray-300 hover:bg-purple-50"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
             </div>
           </DialogHeader>
 

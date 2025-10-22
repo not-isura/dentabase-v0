@@ -1,0 +1,36 @@
+create table public.appointments (
+  appointment_id uuid not null default gen_random_uuid (),
+  doctor_id uuid not null,
+  patient_id uuid not null,
+  requested_start_time timestamp with time zone not null,
+  proposed_start_time timestamp with time zone null,
+  proposed_end_time timestamp with time zone null,
+  booked_start_time timestamp with time zone null,
+  booked_end_time timestamp with time zone null,
+  availability_id uuid null,
+  status public.appointment_status not null default 'requested'::appointment_status,
+  concern text not null,
+  feedback_type public.appointment_feedback_type null,
+  feedback text null,
+  created_at timestamp with time zone not null default now(),
+  updated_at timestamp with time zone not null default now(),
+  is_active boolean not null default true,
+  constraint appointments_pkey primary key (appointment_id),
+  constraint appointments_availability_id_fkey foreign KEY (availability_id) references doc_availability (availability_id) on delete set null,
+  constraint appointments_doctor_id_fkey foreign KEY (doctor_id) references doctors (doctor_id) on delete CASCADE,
+  constraint appointments_patient_id_fkey foreign KEY (patient_id) references patient (patient_id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_appointments_is_active on public.appointments using btree (is_active) TABLESPACE pg_default;
+
+create index IF not exists idx_appointments_patient_active_status on public.appointments using btree (patient_id, is_active, status) TABLESPACE pg_default;
+
+create trigger appointment_status_change_trigger
+after INSERT
+or
+update OF status on appointments for EACH row
+execute FUNCTION create_appointment_history ();
+
+create trigger set_appointments_updated_at BEFORE
+update on appointments for EACH row
+execute FUNCTION set_updated_at ();
