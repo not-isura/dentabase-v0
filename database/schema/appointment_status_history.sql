@@ -9,6 +9,7 @@ create table public.appointment_status_history (
   created_at timestamp with time zone null default now(),
   related_time timestamp with time zone null,
   related_end_time timestamp with time zone null,
+  feedback text null,
   constraint appointment_status_history_pkey primary key (history_id),
   constraint appointment_status_history_appointment_id_fkey foreign KEY (appointment_id) references appointments (appointment_id) on delete CASCADE,
   constraint appointment_status_history_changed_by_user_id_fkey foreign KEY (changed_by_user_id) references users (user_id),

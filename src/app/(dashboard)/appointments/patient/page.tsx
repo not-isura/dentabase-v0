@@ -18,6 +18,8 @@ type StatusEntry = {
   description: string;
   relatedTime?: string; // Snapshot of appointment START time at this status
   relatedEndTime?: string; // Snapshot of appointment END time at this status
+  notes?: string; // Notes from staff/admin
+  feedback?: string; // Additional feedback from staff (separate from notes)
 };
 
 interface ProgressTrackerProps {
@@ -131,9 +133,18 @@ const StatusHistory: React.FC<StatusHistoryProps> = ({ history }) => {
                 {entry.status}
               </p>
               <p className="text-sm text-gray-600 leading-relaxed mb-3">{entry.description}</p>
+              
+              {/* Show feedback from staff if available */}
+              {entry.feedback && (
+                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-xs font-semibold text-blue-900 mb-1">Message from Clinic:</p>
+                  <p className="text-sm text-blue-800 whitespace-pre-line">{entry.feedback}</p>
+                </div>
+              )}
+              
               {/* Show related appointment time if available */}
               {entry.relatedTime && (
-                <div className="inline-flex items-center gap-2 text-xs font-medium text-[hsl(258_46%_30%)] bg-[hsl(258_46%_95%)] border border-[hsl(258_46%_85%)] rounded-lg px-3 py-2 hover:bg-[hsl(258_46%_92%)] transition-colors duration-200">
+                <div className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-[hsl(258_46%_30%)] bg-[hsl(258_46%_95%)] border border-[hsl(258_46%_85%)] rounded-lg px-3 py-2 hover:bg-[hsl(258_46%_92%)] transition-colors duration-200">
                   <Calendar className="h-4 w-4 text-[hsl(258_46%_45%)]" />
                   <span className="font-semibold">
                     {entry.status === 'Requested' ? 'Requested time:' : 'Appointment time:'}
@@ -373,28 +384,46 @@ const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
         </div>
       </CardHeader>
       <CardContent className="p-6 space-y-6">
-        {/* Completed Appointment Banner - Compact at Top */}
-        {status.toLowerCase() === 'completed' && (
-          <div className="p-3 bg-gradient-to-r from-emerald-50 to-green-50 rounded-lg border border-emerald-200 shadow-sm">
+        {/* Completed/Rejected/Cancelled Appointment Banner - Compact at Top */}
+        {(status.toLowerCase() === 'completed' || status.toLowerCase() === 'rejected' || status.toLowerCase() === 'cancelled') && (
+          <div className={`p-3 rounded-lg border shadow-sm ${
+            status.toLowerCase() === 'completed' 
+              ? 'bg-gradient-to-r from-emerald-50 to-green-50 border-emerald-200' 
+              : 'bg-gradient-to-r from-red-50 to-orange-50 border-red-200'
+          }`}>
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-full flex items-center justify-center">
-                  <Check className="h-4 w-4 text-white" />
+                <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+                  status.toLowerCase() === 'completed'
+                    ? 'bg-gradient-to-br from-emerald-500 to-emerald-600'
+                    : 'bg-gradient-to-br from-red-500 to-red-600'
+                }`}>
+                  {status.toLowerCase() === 'completed' ? (
+                    <Check className="h-4 w-4 text-white" />
+                  ) : (
+                    <X className="h-4 w-4 text-white" />
+                  )}
                 </div>
                 <div>
-                  <p className="text-xs font-bold text-emerald-900">Completed</p>
-                  <p className="text-[10px] text-emerald-700">Thank you for visiting!</p>
+                  <p className={`text-xs font-bold ${
+                    status.toLowerCase() === 'completed' ? 'text-emerald-900' : 'text-red-900'
+                  }`}>
+                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                  </p>
+                  <p className={`text-[10px] ${
+                    status.toLowerCase() === 'completed' 
+                      ? 'text-emerald-700' 
+                      : 'text-red-700'
+                  }`}>
+                    {status.toLowerCase() === 'completed' 
+                      ? 'Thank you for visiting!' 
+                      : status.toLowerCase() === 'rejected'
+                      ? 'Appointment could not be accommodated'
+                      : 'Appointment has been cancelled'}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button
-                  onClick={onCreateNew}
-                  size="sm"
-                  className="bg-gradient-to-r from-[hsl(258_46%_45%)] to-[hsl(258_46%_35%)] hover:from-[hsl(258_46%_35%)] hover:to-[hsl(258_46%_25%)] text-white text-xs font-semibold py-1.5 px-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-300"
-                >
-                  <Plus className="h-3.5 w-3.5 mr-1" />
-                  Book New
-                </Button>
                 <Button
                   onClick={async () => {
                     try {
@@ -411,17 +440,21 @@ const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
                         return;
                       }
                       
-                      // Refresh to remove from UI
+                      // Refresh to remove from UI and allow new appointment creation
                       window.location.reload();
                     } catch (error) {
                       console.error('Error dismissing:', error);
                     }
                   }}
                   size="sm"
-                  variant="outline"
-                  className="border border-emerald-300 text-emerald-700 hover:bg-emerald-100 text-xs font-semibold py-1.5 px-3 rounded-lg transition-all duration-300"
+                  className={`text-xs font-semibold py-1.5 px-4 rounded-lg shadow-sm hover:shadow-md transition-all duration-300 ${
+                    status.toLowerCase() === 'completed'
+                      ? 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white'
+                      : 'bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white'
+                  }`}
                 >
-                  Dismiss
+                  <Check className="h-3.5 w-3.5 mr-1.5 inline" />
+                  Dismiss to Create New
                 </Button>
               </div>
             </div>
@@ -917,7 +950,7 @@ export default function AppointmentsPatientPage() {
         `)
         .eq('patient_id', patientData.patient_id)
         .eq('is_active', true)
-        .in('status', ['requested', 'proposed', 'booked', 'arrived', 'ongoing', 'completed'])
+        .in('status', ['requested', 'proposed', 'booked', 'arrived', 'ongoing', 'completed', 'rejected', 'cancelled'])
         .order('created_at', { ascending: false })
         .limit(1);
 
@@ -964,7 +997,7 @@ export default function AppointmentsPatientPage() {
       // Fetch status history from appointment_status_history table
       const { data: statusHistory, error: historyError } = await supabase
         .from('appointment_status_history')
-        .select('status, changed_at, notes, changed_by_user_id, related_time, related_end_time')
+        .select('status, changed_at, notes, feedback, changed_by_user_id, related_time, related_end_time') // ✅ Added feedback
         .eq('appointment_id', appointment.appointment_id)
         .order('changed_at', { ascending: false }); // Latest first
 
@@ -994,34 +1027,51 @@ export default function AppointmentsPatientPage() {
         'arrived': 3,
         'ongoing': 4,
         'completed': 5,
+        'rejected': -1, // Special case: terminated flow
+        'cancelled': -1, // Special case: terminated flow
       };
       
       const currentStep = statusMap[appointment.status.toLowerCase()] ?? 0;
       
-      // Helper function to generate description based on status and times
-      const generateDescription = (entry: any) => {
-        // If it's the proposed status, check if times match
-        if (entry.status === 'proposed') {
-          const requestedTime = appointment.requested_start_time;
-          const proposedTime = appointment.proposed_start_time;
+      // Calculate rejected step indices based on status
+      const rejectedStepIndices: number[] = [];
+      const currentStatus = appointment.status.toLowerCase();
+      
+      if (currentStatus === 'rejected' || currentStatus === 'cancelled') {
+        // Find the last completed step from status history
+        let lastCompletedStep = currentStep;
+        
+        // Check status history to find the highest step reached
+        if (statusHistory && statusHistory.length > 0) {
+          const completedStatuses = statusHistory
+            .map(h => h.status.toLowerCase())
+            .filter(s => s !== 'rejected' && s !== 'cancelled');
           
-          // If proposed_start_time is null, it means dentist hasn't set a specific time yet
-          if (!proposedTime) {
-            return 'The dentist is reviewing your appointment request.';
-          }
+          const maxStep = Math.max(
+            ...completedStatuses.map(s => statusMap[s] ?? -1)
+          );
           
-          // If times are the same, dentist confirmed the requested time
-          if (requestedTime && proposedTime && 
-              new Date(requestedTime).getTime() === new Date(proposedTime).getTime()) {
-            return 'Your requested time has been confirmed. Please confirm your appointment.';
-          } else {
-            // Times are different, dentist proposed alternative
-            return 'The dentist has proposed an alternative time for your appointment. Please review and confirm.';
+          if (maxStep >= 0) {
+            lastCompletedStep = maxStep;
           }
         }
         
-        // For other statuses, use notes or default
-        return entry.notes || `Status changed to ${entry.status}`;
+        // The X mark goes on the NEXT step after the last completed one
+        const rejectedStepIndex = lastCompletedStep + 1;
+        if (rejectedStepIndex < steps.length) {
+          rejectedStepIndices.push(rejectedStepIndex);
+        }
+      }
+      
+      // Helper function to generate description based on status and times
+      const generateDescription = (entry: any) => {
+        // Always use notes from database if available (consistent with admin view)
+        if (entry.notes) {
+          return entry.notes;
+        }
+        
+        // Fallback for entries without notes
+        return `Status changed to ${entry.status}`;
       };
       
       // Convert database history to UI format
@@ -1043,6 +1093,8 @@ export default function AppointmentsPatientPage() {
                 ? 'To Confirm'  // Change "Proposed" to "To Confirm" in history display
                 : entry.status.charAt(0).toUpperCase() + entry.status.slice(1),
               description: generatedDesc,
+              notes: entry.notes || undefined, // Include notes from staff
+              feedback: entry.feedback || undefined, // ✅ Include feedback from staff
               relatedTime: entry.related_time ? new Date(entry.related_time).toLocaleString('en-US', {
                 weekday: 'short',
                 month: 'short',
@@ -1089,7 +1141,7 @@ export default function AppointmentsPatientPage() {
         steps,
         currentStep,
         history,
-        rejectedStepIndices: [],
+        rejectedStepIndices, // Now dynamically calculated based on status
         // Store full appointment details
         appointmentId: appointment.appointment_id,
         doctorId: appointment.doctor_id,
@@ -1116,6 +1168,53 @@ export default function AppointmentsPatientPage() {
   useEffect(() => {
     fetchActiveAppointment();
   }, []);
+
+  // Real-time subscription for appointments and status history
+  useEffect(() => {
+    const supabase = createClient();
+    
+    // Subscribe to appointments table changes
+    const appointmentsChannel = supabase
+      .channel('patient-appointments-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
+          schema: 'public',
+          table: 'appointments'
+        },
+        (payload) => {
+          console.log('📡 Appointment change detected:', payload);
+          // Refetch the active appointment when any change occurs
+          fetchActiveAppointment();
+        }
+      )
+      .subscribe();
+
+    // Subscribe to appointment_status_history table changes
+    const statusHistoryChannel = supabase
+      .channel('patient-status-history-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
+          schema: 'public',
+          table: 'appointment_status_history'
+        },
+        (payload) => {
+          console.log('📡 Status history change detected:', payload);
+          // Refetch the active appointment when status history changes
+          fetchActiveAppointment();
+        }
+      )
+      .subscribe();
+
+    // Cleanup subscriptions on unmount
+    return () => {
+      supabase.removeChannel(appointmentsChannel);
+      supabase.removeChannel(statusHistoryChannel);
+    };
+  }, []); // Empty dependency array - only set up once on mount
 
   const appointmentCardData = activeAppointment
     ? {
@@ -1321,13 +1420,64 @@ export default function AppointmentsPatientPage() {
   const handleCancelAppointment = async () => {
     if (!activeAppointment?.appointmentId) return;
 
+    setIsCancelling(true);
+
     try {
       const supabase = createClient();
 
-      // Update appointment status to cancelled
+      // Get current user for history record
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new Error('Authentication required');
+      }
+
+      // Get user_id from auth_id
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('user_id')
+        .eq('auth_id', user.id)
+        .single();
+
+      if (userError || !userData) {
+        throw new Error('User not found');
+      }
+
+      // Fetch appointment to get the correct time to snapshot
+      const { data: appointmentData, error: fetchError } = await supabase
+        .from('appointments')
+        .select('requested_start_time')
+        .eq('appointment_id', activeAppointment.appointmentId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // Insert status history FIRST (manual insertion for cancelled status)
+      const { error: historyError } = await supabase
+        .from('appointment_status_history')
+        .insert({
+          appointment_id: activeAppointment.appointmentId,
+          status: 'cancelled',
+          changed_by_user_id: userData.user_id,
+          notes: 'Your appointment has been cancelled.',
+          feedback: null, // No custom feedback from patient cancel
+          related_time: appointmentData?.requested_start_time,
+          related_end_time: null
+        });
+
+      if (historyError) {
+        console.error('Error inserting status history:', historyError);
+        console.error('History error details:', JSON.stringify(historyError, null, 2));
+        throw historyError;
+      }
+
+      // Update appointment status with feedback_type to signal trigger to skip
       const { error } = await supabase
         .from('appointments')
-        .update({ status: 'cancelled' })
+        .update({ 
+          status: 'cancelled',
+          feedback_type: 'cancelled', // Signal to trigger to skip auto-insert
+          updated_at: new Date().toISOString()
+        })
         .eq('appointment_id', activeAppointment.appointmentId);
 
       if (error) {
@@ -1341,7 +1491,9 @@ export default function AppointmentsPatientPage() {
         message: 'Appointment cancelled successfully.'
       });
 
-      // Refresh to update UI (will show as cancelled or remove from active)
+      setIsCancelModalOpen(false);
+
+      // Refresh to update UI (will show as cancelled with red banner)
       await fetchActiveAppointment();
 
       // Auto-dismiss
@@ -1360,6 +1512,8 @@ export default function AppointmentsPatientPage() {
       setTimeout(() => {
         setAlert(null);
       }, 5000);
+    } finally {
+      setIsCancelling(false);
     }
   };
 

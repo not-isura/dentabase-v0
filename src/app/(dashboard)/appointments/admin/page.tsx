@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Plus, Search, Filter, Calendar as CalendarIcon, Clock, User, Phone, Mail, ArrowLeft, Check, X, AlertTriangle, RotateCcw, Users, Stethoscope, FileText, Flag, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { Plus, Search, Filter, Calendar as CalendarIcon, Clock, User, Phone, Mail, ArrowLeft, Check, X, AlertTriangle, RotateCcw, Users, Stethoscope, FileText, Flag, ChevronLeft, ChevronRight, RefreshCw, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,8 +10,15 @@ import CalendarRange from "@/components/ui/calendar-range";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { NewAppointmentModal } from "@/components/NewAppointmentModal";
-import { useToast } from "@/hooks/use-toast";
+import RescheduleModal from "@/components/RescheduleModal";
 import { createClient } from "@/lib/supabase/client";
+
+interface Notification {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  title: string;
+  message: string;
+}
 
 interface Appointment {
   id: string;
@@ -37,6 +44,15 @@ interface Appointment {
   proposedEndTime?: string;
   bookedStartTime?: string;
   bookedEndTime?: string;
+  // Status history
+  statusHistory?: Array<{
+    history_id: string;
+    status: string;
+    changed_at: string;
+    notes?: string;
+    changed_by_user_id: string;
+    changed_by_name?: string;
+  }>;
 }
 
 interface Doctor {
@@ -117,9 +133,10 @@ function formatDateShort(dateStr: string) {
   const [y, m, d] = dateStr.split("-").map(Number);
   const dt = new Date(y, (m || 1) - 1, d || 1);
   return new Intl.DateTimeFormat(undefined, {
-    month: "2-digit",
-    day: "2-digit",
-    year: "2-digit",
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
   }).format(dt);
 }
 
@@ -170,9 +187,10 @@ function formatDateShortFromISO(iso?: string) {
   if (!iso) return "-";
   const dt = new Date(iso);
   return new Intl.DateTimeFormat(undefined, {
-    month: "2-digit",
-    day: "2-digit",
-    year: "2-digit",
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
   }).format(dt);
 }
 
@@ -187,7 +205,8 @@ function formatTime12hFromISO(iso?: string) {
 }
 
 export default function AdminAppointmentsPage() {
-  const { toast } = useToast();
+  // Notification state
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   
   // Database state
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -230,6 +249,8 @@ export default function AdminAppointmentsPage() {
   const [acceptAppointment, setAcceptAppointment] = useState<Appointment | null>(null);
   const [acceptEndTime, setAcceptEndTime] = useState("");
   const [isAccepting, setIsAccepting] = useState(false);
+  const [isAcceptConfirmOpen, setIsAcceptConfirmOpen] = useState(false);
+  const [acceptFeedback, setAcceptFeedback] = useState("");
 
 
   // Weekly calendar state
@@ -556,6 +577,21 @@ export default function AdminAppointmentsPage() {
     }
   };
 
+  // Notification helpers
+  const showNotification = (type: 'success' | 'error' | 'info', title: string, message: string) => {
+    const id = Date.now().toString();
+    setNotifications(prev => [...prev, { id, type, title, message }]);
+    
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 5000);
+  };
+
+  const dismissNotification = (id: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  };
+
   // Propose Time handlers
   const handleProposeTime = (appointment: Appointment) => {
     setProposeAppointment(appointment);
@@ -566,14 +602,30 @@ export default function AdminAppointmentsPage() {
     setIsProposeTimeOpen(true);
   };
 
-  // Accept Appointment handler
-  const handleAcceptAppointment = async () => {
+  // Accept Appointment - Show confirmation dialog
+  const handleAcceptAppointmentClick = () => {
+    if (!acceptAppointment) {
+      return;
+    }
+    
+    // If no end time is set, set a default (1 hour after start time)
+    if (!acceptEndTime) {
+      const startTime = acceptAppointment.time;
+      const [hours, minutes] = startTime.split(':').map(Number);
+      let endHour = hours + 1;
+      if (endHour >= 24) endHour = 23;
+      const endTimeStr = `${String(endHour).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+      setAcceptEndTime(endTimeStr);
+    }
+    
+    // Close the time selection modal and open confirmation
+    setIsAcceptModalOpen(false);
+    setIsAcceptConfirmOpen(true);
+  };
+
+  // Accept Appointment - Final submission
+  const handleAcceptAppointmentConfirm = async () => {
     if (!acceptAppointment || !acceptEndTime) {
-      toast({
-        title: "Validation Error",
-        description: "Please select an end time.",
-        variant: "destructive",
-      });
       return;
     }
 
@@ -581,11 +633,93 @@ export default function AdminAppointmentsPage() {
       setIsAccepting(true);
       const supabase = createClient();
       
+      // Fetch the original appointment to get the requested_start_time
+      const { data: originalApt, error: fetchError } = await supabase
+        .from('appointments')
+        .select('requested_start_time, appointment_id')
+        .eq('appointment_id', acceptAppointment.id)
+        .single();
+
+      if (fetchError) throw fetchError;
+      if (!originalApt) throw new Error('Appointment not found');
+
+      // Use the requested_start_time as the proposed_start_time
+      const proposedStartTime = originalApt.requested_start_time;
+      
+      // Construct the proposed_end_time from the date and the acceptEndTime (HH:mm format)
+      const startDate = new Date(proposedStartTime);
+      const [endHours, endMinutes] = acceptEndTime.split(':').map(Number);
+      const proposedEndTime = new Date(startDate);
+      proposedEndTime.setHours(endHours, endMinutes, 0, 0);
+      
+      // Get user data for history (before updating appointment)
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      console.log('Auth user:', user?.id);
+      
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('user_id')
+        .eq('auth_id', user?.id) // ✅ FIX: Use auth_id instead of id
+        .single();
+
+      console.log('User data:', userData, 'Error:', userError);
+
+      if (userError || !userData) {
+        console.error('Failed to get user data:', userError);
+        throw new Error('User data not found');
+      }
+
+      // HYBRID APPROACH: Insert status history manually with custom notes
+      // This prevents the trigger from auto-creating a generic history entry
+      const defaultNote = 'Your appointment has been accepted. Please confirm the time.';
+      // ✅ FIX: Don't combine - store separately!
+      // notes = default message only
+      // feedback = staff's custom note only
+
+      console.log('Attempting to insert history:', {
+        appointment_id: acceptAppointment.id,
+        status: 'proposed',
+        changed_by_user_id: userData?.user_id,
+        notes: defaultNote, // ✅ Only default message
+        feedback: acceptFeedback.trim() || null, // ✅ Only custom feedback
+        related_time: proposedStartTime,
+        related_end_time: proposedEndTime.toISOString(),
+      });
+
+      const { data: historyData, error: historyError } = await supabase
+        .from('appointment_status_history')
+        .insert({
+          appointment_id: acceptAppointment.id,
+          status: 'proposed',
+          changed_by_user_id: userData?.user_id,
+          notes: defaultNote, // ✅ Store only the default message
+          feedback: acceptFeedback.trim() || null, // ✅ Store feedback in separate column
+          related_time: proposedStartTime,
+          related_end_time: proposedEndTime.toISOString(),
+          changed_at: new Date().toISOString()
+        })
+        .select();
+
+      if (historyError) {
+        console.error('Detailed history error:', {
+          message: historyError.message,
+          details: historyError.details,
+          hint: historyError.hint,
+          code: historyError.code,
+          full: historyError
+        });
+        throw historyError; // Don't continue if history insert fails
+      }
+
+      console.log('History inserted successfully:', historyData);
+
+      // Now update the appointment status (NO feedback field - that's in history!)
       const { error } = await supabase
         .from('appointments')
         .update({ 
-          proposed_start_time: acceptAppointment.time,
-          proposed_end_time: acceptEndTime,
+          proposed_start_time: proposedStartTime,
+          proposed_end_time: proposedEndTime.toISOString(),
           status: 'proposed',
           updated_at: new Date().toISOString()
         })
@@ -593,34 +727,29 @@ export default function AdminAppointmentsPage() {
 
       if (error) throw error;
 
-      toast({
-        title: "Appointment Accepted",
-        description: "Appointment has been accepted and sent to patient for confirmation.",
-      });
-
-      setIsAcceptModalOpen(false);
+      // Close all modals and reset state
+      setIsAcceptConfirmOpen(false);
       setAcceptAppointment(null);
       setAcceptEndTime("");
+      setAcceptFeedback("");
+      setIsAppointmentModalOpen(false);
+      setSelectedAppointment(null);
+      
+      // Show success notification
+      showNotification('success', 'Appointment Accepted', 'Appointment has been accepted and sent to patient for confirmation.');
+
       fetchAppointments();
     } catch (error) {
       console.error('Error accepting appointment:', error);
-      toast({
-        title: "Error",
-        description: "Failed to accept appointment. Please try again.",
-        variant: "destructive",
-      });
+      showNotification('error', 'Error', 'Failed to accept appointment. Please try again.');
     } finally {
       setIsAccepting(false);
     }
   };
 
-  const handleSubmitProposedTime = async () => {
-    if (!proposeAppointment || !proposeDate || !proposeTime || !proposeEndTime) {
-      toast({
-        title: "Validation Error",
-        description: "Please select date, start time, and end time.",
-        variant: "destructive",
-      });
+  const handleSubmitProposedTime = async (data: { date: string; startTime: string; endTime: string; reason?: string }) => {
+    if (!proposeAppointment) {
+      showNotification('error', 'Error', 'No appointment selected.');
       return;
     }
 
@@ -628,40 +757,70 @@ export default function AdminAppointmentsPage() {
       setIsProposing(true);
       const supabase = createClient();
       
+      // Construct full ISO timestamps from date and times
+      const startDateTime = new Date(`${data.date}T${data.startTime}:00`);
+      const endDateTime = new Date(`${data.date}T${data.endTime}:00`);
+      
+      // Get user data for history (before updating appointment)
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: userData } = await supabase
+        .from('users')
+        .select('user_id')
+        .eq('auth_id', user?.id) // ✅ FIX: Use auth_id instead of id
+        .single();
+
+      // HYBRID APPROACH: Insert status history manually with custom notes
+      const defaultNote = 'Your appointment time has been rescheduled. Please confirm the new time.';
+      // ✅ FIX: Don't combine - store separately!
+      
+      const { error: historyError } = await supabase
+        .from('appointment_status_history')
+        .insert({
+          appointment_id: proposeAppointment.id,
+          status: 'proposed',
+          changed_by_user_id: userData?.user_id,
+          notes: defaultNote, // ✅ Only default message
+          feedback: data.reason?.trim() || null, // ✅ Only custom feedback
+          related_time: startDateTime.toISOString(),
+          related_end_time: endDateTime.toISOString(),
+          changed_at: new Date().toISOString()
+        });
+
+      if (historyError) {
+        console.error('Error inserting status history:', historyError);
+        throw historyError; // Don't continue if history insert fails
+      }
+
+      // Now update the appointment (NO feedback field - that's in history!)
       const { error } = await supabase
         .from('appointments')
         .update({ 
-          appointment_date: proposeDate,
-          appointment_time: proposeTime,
-          proposed_start_time: proposeTime,
-          proposed_end_time: proposeEndTime,
+          proposed_start_time: startDateTime.toISOString(),
+          proposed_end_time: endDateTime.toISOString(),
           status: 'proposed',
-          notes: proposeReason ? `Rescheduled: ${proposeReason}` : undefined,
           updated_at: new Date().toISOString()
         })
         .eq('appointment_id', proposeAppointment.id);
 
       if (error) throw error;
 
-      toast({
-        title: "Time Rescheduled",
-        description: "New appointment time has been sent to the patient for confirmation.",
-      });
-
+      // Close both modals
       setIsProposeTimeOpen(false);
       setProposeAppointment(null);
       setProposeDate("");
       setProposeTime("");
       setProposeEndTime("");
       setProposeReason("");
+      setIsAppointmentModalOpen(false);
+      setSelectedAppointment(null);
+      
+      // Show success notification
+      showNotification('success', 'Time Rescheduled', 'New appointment time has been sent to the patient for confirmation.');
+
       fetchAppointments();
     } catch (error) {
       console.error('Error proposing time:', error);
-      toast({
-        title: "Error",
-        description: "Failed to propose new time. Please try again.",
-        variant: "destructive",
-      });
+      showNotification('error', 'Error', 'Failed to propose new time. Please try again.');
     } finally {
       setIsProposing(false);
     }
@@ -846,10 +1005,7 @@ export default function AdminAppointmentsPage() {
       requestedAt: new Date().toISOString(),
     };
     setAppointments([...appointments, appointmentWithDoctor]);
-    toast({
-      title: "Appointment Scheduled",
-      description: `Appointment for ${newAppointment.patientName} has been scheduled successfully.`,
-    });
+    showNotification('success', 'Appointment Scheduled', `Appointment for ${newAppointment.patientName} has been scheduled successfully.`);
   };
 
   const demoTodayStr = toYMD(minDate);
@@ -868,40 +1024,132 @@ export default function AdminAppointmentsPage() {
 
   const handleStatusChange = async (appointmentId: string, newStatus: Appointment["status"], reason?: string) => {
     try {
+      console.log('Updating appointment:', { appointmentId, newStatus, reason });
       const supabase = createClient();
+      
+      // Get current user for history record
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new Error('Authentication required');
+      }
+
+      // Get user_id from auth_id
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('user_id')
+        .eq('auth_id', user.id)
+        .single();
+
+      if (userError || !userData) {
+        throw new Error('User not found');
+      }
+
+      // HYBRID APPROACH: Determine if we need manual history insertion
+      // Manual insert for: rejected, cancelled (need custom notes with reasons)
+      // Auto-insert by trigger for: arrived, ongoing, completed (simple status changes)
+      const needsManualHistory = ['rejected', 'cancelled'].includes(newStatus);
+
+      if (needsManualHistory) {
+        // Fetch appointment to get the correct time to snapshot
+        const { data: appointmentData, error: fetchError } = await supabase
+          .from('appointments')
+          .select('requested_start_time')
+          .eq('appointment_id', appointmentId)
+          .single();
+
+        if (fetchError) throw fetchError;
+
+        // Insert status history BEFORE updating appointment (for reject/cancel with custom notes)
+        const defaultNotes: Record<string, string> = {
+          'cancelled': 'Your appointment has been cancelled.',
+          'rejected': 'Unfortunately, your appointment request could not be accommodated.'
+        };
+
+        const historyNotes = defaultNotes[newStatus] || `Your appointment status has been updated.`;
+        // ✅ FIX: Don't combine - store separately!
+
+        const { error: historyError } = await supabase
+          .from('appointment_status_history')
+          .insert({
+            appointment_id: appointmentId,
+            status: newStatus,
+            changed_by_user_id: userData.user_id,
+            notes: historyNotes, // ✅ Only default message
+            feedback: reason?.trim() || null, // ✅ Only custom feedback - YES, saves to feedback column!
+            related_time: appointmentData?.requested_start_time,
+            related_end_time: null
+          });
+
+        if (historyError) {
+          console.error('Error inserting status history:', historyError);
+          console.error('History error details:', JSON.stringify(historyError, null, 2));
+          throw historyError; // Don't continue if history insert fails
+        }
+      }
       
       const updateData: any = {
         status: newStatus,
         updated_at: new Date().toISOString()
       };
 
-      // Add reason to notes if provided
-      if (reason) {
-        updateData.notes = reason;
+      // Add reason to feedback if provided (for rejected/cancelled status)
+      // This also signals the trigger to skip auto-insertion
+      if (reason || needsManualHistory) {
+        updateData.feedback = reason || (needsManualHistory ? `Status changed to ${newStatus}` : undefined);
+        // Set feedback_type based on status (using enum values: rejected, cancelled, rescheduled)
+        if (newStatus === 'rejected') {
+          updateData.feedback_type = 'rejected';
+        } else if (newStatus === 'cancelled') {
+          updateData.feedback_type = 'cancelled';
+        }
       }
 
-      const { error } = await supabase
+      console.log('Update data:', updateData);
+
+      const { data, error } = await supabase
         .from('appointments')
         .update(updateData)
-        .eq('appointment_id', appointmentId);
+        .eq('appointment_id', appointmentId)
+        .select();
 
-      if (error) throw error;
+      console.log('Supabase response:', { data, error });
 
-      const nice = newStatus.charAt(0).toUpperCase() + newStatus.slice(1);
-      toast({
-        title: "Status Updated",
-        description: reason ? `${nice}. Reason: ${reason}` : `Appointment status changed to ${nice}.`,
-      });
+      if (error) {
+        console.error('Supabase error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
+        throw error;
+      }
+
+      // For simple status changes (arrived, ongoing, completed), the trigger handles history automatically
+      // No manual insertion needed
+
+      // Show appropriate notification based on status
+      if (newStatus === 'rejected') {
+        showNotification('success', 'Appointment Rejected', reason ? `Appointment has been rejected. Reason: ${reason}` : 'Appointment has been rejected.');
+      } else if (newStatus === 'cancelled') {
+        showNotification('success', 'Appointment Cancelled', reason ? `Appointment has been cancelled. Reason: ${reason}` : 'Appointment has been cancelled.');
+      } else if (newStatus === 'arrived') {
+        showNotification('success', 'Patient Arrived', 'Patient has been marked as arrived.');
+      } else if (newStatus === 'ongoing') {
+        showNotification('success', 'Appointment Ongoing', 'Appointment is now ongoing.');
+      } else if (newStatus === 'completed') {
+        showNotification('success', 'Appointment Completed', 'Appointment has been marked as completed.');
+      } else {
+        const nice = newStatus.charAt(0).toUpperCase() + newStatus.slice(1);
+        showNotification('success', 'Status Updated', `Appointment status changed to ${nice}.`);
+      }
 
       // Refresh appointments to get latest data
       fetchAppointments();
     } catch (error) {
       console.error('Error updating appointment status:', error);
-      toast({
-        title: "Error",
-        description: "Failed to update appointment status. Please try again.",
-        variant: "destructive",
-      });
+      console.error('Error type:', typeof error);
+      console.error('Error keys:', error ? Object.keys(error) : 'null');
+      showNotification('error', 'Error', 'Failed to update appointment status. Please try again.');
     }
   };
 
@@ -926,36 +1174,101 @@ export default function AdminAppointmentsPage() {
   const applyConfirmedAction = () => {
     if (!pendingAction.appointment) return;
     const apt = pendingAction.appointment;
+    
+    // Capture actionReasonText BEFORE clearing it
+    const feedback = actionReasonText.trim();
+    
     if (pendingAction.type === "accept") {
-      handleStatusChange(apt.id, "proposed");
+      handleStatusChange(apt.id, "proposed", feedback);
     } else if (pendingAction.type === "arrive") {
-      handleStatusChange(apt.id, "arrived");
+      handleStatusChange(apt.id, "arrived", feedback);
     } else if (pendingAction.type === "ongoing") {
-      handleStatusChange(apt.id, "ongoing");
+      handleStatusChange(apt.id, "ongoing", feedback);
     } else if (pendingAction.type === "complete") {
-      handleStatusChange(apt.id, "completed");
+      handleStatusChange(apt.id, "completed", feedback);
     } else if (pendingAction.type === "cancel") {
-      handleStatusChange(apt.id, "cancelled", actionReasonText.trim());
+      handleStatusChange(apt.id, "cancelled", feedback);
     } else if (pendingAction.type === "reject") {
-      handleStatusChange(apt.id, "rejected", actionReasonText.trim());
+      handleStatusChange(apt.id, "rejected", feedback);
     }
     setIsConfirmDialogOpen(false);
     setActionReasonText("");
-    if (isAppointmentModalOpen) setIsAppointmentModalOpen(false);
+    
+    // Close appointment details modal if open
+    if (isAppointmentModalOpen) {
+      setIsAppointmentModalOpen(false);
+      setSelectedAppointment(null);
+    }
   };
 
   const applyReasonAction = () => {
-    // capture reason first, then confirm
+    // For reject/cancel: directly execute the action with feedback
     if (!pendingAction.appointment) return;
     if (!actionReasonText.trim()) return;
+    
+    const apt = pendingAction.appointment;
+    const feedback = actionReasonText.trim();
+    
+    if (pendingAction.type === "reject") {
+      handleStatusChange(apt.id, "rejected", feedback);
+    } else if (pendingAction.type === "cancel") {
+      handleStatusChange(apt.id, "cancelled", feedback);
+    }
+    
     setIsReasonDialogOpen(false);
-    setIsConfirmDialogOpen(true);
+    setActionReasonText("");
+    
+    // Close appointment details modal if open
+    if (isAppointmentModalOpen) {
+      setIsAppointmentModalOpen(false);
+      setSelectedAppointment(null);
+    }
   };
 
-  const handleAppointmentClick = (appointment: Appointment) => {
+  const handleAppointmentClick = async (appointment: Appointment) => {
     setSelectedAppointment(appointment);
     setAppointmentNotes(appointment.notes || "");
     setIsAppointmentModalOpen(true);
+    
+    // Fetch status history for this appointment
+    try {
+      const supabase = createClient();
+      const { data: historyData, error: historyError } = await supabase
+        .from('appointment_status_history')
+        .select(`
+          history_id,
+          status,
+          changed_at,
+          notes,
+          feedback,
+          changed_by_user_id,
+          users:changed_by_user_id (
+            first_name,
+            middle_name,
+            last_name,
+            role
+          )
+        `)
+        .eq('appointment_id', appointment.id)
+        .order('changed_at', { ascending: false });
+
+      if (!historyError && historyData) {
+        const historyWithNames = historyData.map((h: any) => ({
+          ...h,
+          changed_by_name: h.users 
+            ? `${h.users.role === 'dentist' ? 'Dr. ' : ''}${h.users.first_name || ''} ${h.users.middle_name || ''} ${h.users.last_name || ''}`.trim()
+            : 'Unknown',
+          changed_by_role: h.users?.role
+        }));
+        
+        setSelectedAppointment({
+          ...appointment,
+          statusHistory: historyWithNames
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching status history:', error);
+    }
   };
 
   const handleAddNotes = () => {
@@ -967,10 +1280,7 @@ export default function AdminAppointmentsPage() {
             : apt
         )
       );
-      toast({
-        title: "Notes Updated",
-        description: "Appointment notes have been saved.",
-      });
+      showNotification('success', 'Notes Updated', 'Appointment notes have been saved.');
     }
   };
 
@@ -1109,6 +1419,73 @@ export default function AdminAppointmentsPage() {
   };
 
   return (
+    <>
+      {/* Notification Stack - Fixed Position */}
+      <div className="fixed bottom-4 right-4 z-50 space-y-3 max-w-md">
+        {notifications.map((notification) => (
+          <div
+            key={notification.id}
+            className={`rounded-lg border shadow-lg p-4 animate-in slide-in-from-right-5 ${
+              notification.type === 'success'
+                ? 'bg-green-50 border-green-200'
+                : notification.type === 'error'
+                ? 'bg-red-50 border-red-200'
+                : 'bg-blue-50 border-blue-200'
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 mt-0.5">
+                {notification.type === 'success' && (
+                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                )}
+                {notification.type === 'error' && (
+                  <XCircle className="h-5 w-5 text-red-600" />
+                )}
+                {notification.type === 'info' && (
+                  <AlertCircle className="h-5 w-5 text-blue-600" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p
+                  className={`text-sm font-semibold ${
+                    notification.type === 'success'
+                      ? 'text-green-900'
+                      : notification.type === 'error'
+                      ? 'text-red-900'
+                      : 'text-blue-900'
+                  }`}
+                >
+                  {notification.title}
+                </p>
+                <p
+                  className={`mt-1 text-sm ${
+                    notification.type === 'success'
+                      ? 'text-green-700'
+                      : notification.type === 'error'
+                      ? 'text-red-700'
+                      : 'text-blue-700'
+                  }`}
+                >
+                  {notification.message}
+                </p>
+              </div>
+              <button
+                onClick={() => dismissNotification(notification.id)}
+                className={`flex-shrink-0 rounded-md p-1 hover:bg-white/50 transition-all cursor-pointer active:scale-90 ${
+                  notification.type === 'success'
+                    ? 'text-green-600'
+                    : notification.type === 'error'
+                    ? 'text-red-600'
+                    : 'text-blue-600'
+                }`}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -2158,6 +2535,7 @@ export default function AdminAppointmentsPage() {
                         {(() => {
                           const dt = new Date(selectedAppointment.requestedAt || '');
                           const date = dt.toLocaleDateString('en-US', { 
+                            weekday: 'long',
                             month: 'long', 
                             day: 'numeric', 
                             year: 'numeric' 
@@ -2206,33 +2584,65 @@ export default function AdminAppointmentsPage() {
                 </CardContent>
               </Card>
 
-              {/* Notes Section */}
+              {/* Appointment Status History */}
               <Card>
                 <CardHeader className="pb-4">
                   <CardTitle className="text-lg flex items-center">
                     <FileText className="mr-2 h-4 w-4" />
-                    Notes & Instructions
+                    Status History
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div>
-                    <label className="text-sm font-medium text-[hsl(258_22%_50%)]">Current Notes</label>
-                    <p className="text-[hsl(258_46%_25%)] mt-1">{selectedAppointment.notes || "No notes available"}</p>
+                <CardContent>
+                  <div className="space-y-3">
+                    {selectedAppointment.statusHistory && selectedAppointment.statusHistory.length > 0 ? (
+                      selectedAppointment.statusHistory.map((history: any, index: number) => (
+                        <div key={index} className="border-l-4 border-[hsl(258_46%_25%)] pl-4 py-2">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              history.status === 'completed' ? 'bg-green-100 text-green-800' :
+                              history.status === 'rejected' || history.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                              history.status === 'ongoing' ? 'bg-blue-100 text-blue-800' :
+                              history.status === 'arrived' ? 'bg-purple-100 text-purple-800' :
+                              history.status === 'booked' ? 'bg-emerald-100 text-emerald-800' :
+                              history.status === 'proposed' ? 'bg-amber-100 text-amber-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {history.status.charAt(0).toUpperCase() + history.status.slice(1)}
+                            </span>
+                            <span className="text-xs text-[hsl(258_22%_50%)]">
+                              {new Date(history.changed_at).toLocaleString('en-US', {
+                                weekday: 'long',
+                                month: 'long',
+                                day: 'numeric',
+                                year: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit',
+                                hour12: true
+                              })}
+                            </span>
+                          </div>
+                          {history.notes && (
+                            <p className="text-sm text-[hsl(258_46%_25%)] mt-1 italic">
+                              "{history.notes}"
+                            </p>
+                          )}
+                          {history.feedback && (
+                            <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                              <p className="text-xs font-semibold text-blue-900 mb-1">Dentist/Staff Note:</p>
+                              <p className="text-sm text-blue-800">{history.feedback}</p>
+                            </div>
+                          )}
+                          {history.changed_by_name && (
+                            <p className="text-xs text-[hsl(258_22%_50%)] mt-1">
+                              By: {history.changed_by_name}
+                            </p>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-[hsl(258_22%_50%)] italic">No status history available</p>
+                    )}
                   </div>
-                  <div>
-                    <label className="text-sm font-medium text-[hsl(258_22%_50%)]">Add/Update Notes</label>
-                    <textarea
-                      value={appointmentNotes}
-                      onChange={(e) => setAppointmentNotes(e.target.value)}
-                      className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-[hsl(258_46%_25%)] placeholder:text-[hsl(258_22%_50%)]"
-                      rows={3}
-                      placeholder="Add notes or special instructions..."
-                    />
-                  </div>
-                  <Button onClick={handleAddNotes} variant="outline" size="sm" className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]">
-                    <FileText className="h-4 w-4 mr-1" />
-                    Save Notes
-                  </Button>
                 </CardContent>
               </Card>
             </div>
@@ -2364,9 +2774,9 @@ export default function AdminAppointmentsPage() {
         </Dialog>
       )}
 
-      {/* Confirm Action Dialog */}
+      {/* Confirm Action Dialog with Feedback */}
       <Dialog open={isConfirmDialogOpen} onOpenChange={setIsConfirmDialogOpen}>
-        <DialogContent className="sm:max-w-[420px] bg-white">
+        <DialogContent className="sm:max-w-[480px] bg-white">
           <DialogHeader>
             <DialogTitle className="text-[hsl(258_46%_25%)]">
               {pendingAction.type === "accept" && "Accept this appointment?"}
@@ -2377,14 +2787,26 @@ export default function AdminAppointmentsPage() {
               {pendingAction.type === "reject" && "Confirm rejection?"}
             </DialogTitle>
           </DialogHeader>
-          <div className="text-[hsl(258_22%_50%)] text-sm">
-            {pendingAction.type === "accept" && "The appointment will be marked as Awaiting. Patient needs to confirm their appointment."}
-            {pendingAction.type === "arrive" && "This will mark the appointment as Arrived (Checked-In)."}
-            {pendingAction.type === "ongoing" && "This will mark the appointment as Ongoing (treatment in progress)."}
-            {pendingAction.type === "complete" && "This will mark the appointment as Completed."}
-            {pendingAction.type === "cancel" && (actionReasonText ? `Reason: ${actionReasonText}` : "Cancellation requires a reason.")}
-            {pendingAction.type === "reject" && (actionReasonText ? `Reason: ${actionReasonText}` : "Rejection requires a reason.")}
+          
+          <div className="space-y-4">
+            {/* Note to Patient Field */}
+            <div>
+              <label className="text-sm font-medium text-[hsl(258_46%_25%)] mb-2 block">
+                Note to Patient (Optional)
+              </label>
+              <textarea
+                value={actionReasonText}
+                onChange={(e) => setActionReasonText(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-[hsl(258_46%_25%)] placeholder:text-[hsl(258_22%_50%)]"
+                rows={3}
+                placeholder="Add any notes that the patient should see..."
+              />
+              <p className="text-xs text-[hsl(258_22%_50%)] mt-1">
+                This note will be visible to the patient in their appointment history.
+              </p>
+            </div>
           </div>
+
           <div className="flex justify-end gap-2 pt-4">
             <Button variant="outline" onClick={() => setIsConfirmDialogOpen(false)} className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]">Cancel</Button>
             <Button onClick={applyConfirmedAction} style={{ backgroundColor: 'hsl(258, 46%, 25%)', color: 'white' }} className="cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity transition-transform duration-200 ease-in-out active:scale-[0.97]">Confirm</Button>
@@ -2392,7 +2814,7 @@ export default function AdminAppointmentsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Reason-required Dialog */}
+      {/* Reject/Cancel Dialog */}
       <Dialog open={isReasonDialogOpen} onOpenChange={setIsReasonDialogOpen}>
         <DialogContent className="sm:max-w-[480px] bg-white">
           <DialogHeader>
@@ -2402,138 +2824,46 @@ export default function AdminAppointmentsPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <p className="text-[hsl(258_22%_50%)] text-sm">Please provide a reason. This will be visible in the appointment details.</p>
-            <textarea
-              value={actionReasonText}
-              onChange={(e) => setActionReasonText(e.target.value)}
-              className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-[hsl(258_46%_25%)] placeholder:text-[hsl(258_22%_50%)]"
-              rows={3}
-              placeholder={pendingAction.type === "reject" ? "Reason for rejection..." : "Reason for cancellation..."}
-            />
+            <div>
+              <label className="text-sm font-medium text-[hsl(258_46%_25%)] mb-2 block">
+                Note to Patient
+              </label>
+              <textarea
+                value={actionReasonText}
+                onChange={(e) => setActionReasonText(e.target.value)}
+                className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-[hsl(258_46%_25%)] placeholder:text-[hsl(258_22%_50%)]"
+                rows={3}
+                placeholder={pendingAction.type === "reject" ? "Reason for rejection..." : "Reason for cancellation..."}
+              />
+              <p className="text-xs text-[hsl(258_22%_50%)] mt-1">
+                This note will be visible to the patient in their appointment history.
+              </p>
+            </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setIsReasonDialogOpen(false)} className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]">Back</Button>
-              <Button onClick={applyReasonAction} disabled={!actionReasonText.trim()} style={{ backgroundColor: 'hsl(258, 46%, 25%)', color: 'white' }} className="cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity transition-transform duration-200 ease-in-out active:scale-[0.97] disabled:opacity-60">Submit</Button>
+              <Button variant="outline" onClick={() => setIsReasonDialogOpen(false)} className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]">Cancel</Button>
+              <Button onClick={applyReasonAction} disabled={!actionReasonText.trim()} style={{ backgroundColor: 'hsl(258, 46%, 25%)', color: 'white' }} className="cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity transition-transform duration-200 ease-in-out active:scale-[0.97] disabled:opacity-60">
+                {pendingAction.type === "reject" ? "Reject" : "Cancel Appointment"}
+              </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
       {/* Reschedule Modal */}
-      <Dialog open={isProposeTimeOpen} onOpenChange={setIsProposeTimeOpen}>
-        <DialogContent className="sm:max-w-[500px] bg-white">
-          <DialogHeader>
-            <DialogTitle className="text-[hsl(258_46%_25%)] flex items-center">
-              <Clock className="mr-2 h-5 w-5" />
-              Reschedule Appointment
-            </DialogTitle>
-            <p className="text-sm text-[hsl(258_22%_50%)] mt-2">
-              Suggest a new date and time for this appointment
-            </p>
-          </DialogHeader>
-          
-          {proposeAppointment && (
-            <div className="space-y-4 py-4">
-              {/* Patient Info */}
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-sm text-gray-600">Patient</p>
-                <p className="font-semibold text-[hsl(258_46%_25%)]">{proposeAppointment.patientName}</p>
-              </div>
-
-              {/* Current Date & Time */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
-                  <p className="text-xs text-amber-700 mb-1">Current Date</p>
-                  <p className="font-medium text-amber-900">{formatDateShort(proposeAppointment.date)}</p>
-                </div>
-                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
-                  <p className="text-xs text-amber-700 mb-1">Current Time</p>
-                  <p className="font-medium text-amber-900">{proposeAppointment.time}</p>
-                </div>
-              </div>
-
-              {/* New Date & Time */}
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm font-medium text-[hsl(258_46%_25%)] mb-2">
-                    New Date *
-                  </label>
-                  <Input
-                    type="date"
-                    value={proposeDate}
-                    onChange={(e) => setProposeDate(e.target.value)}
-                    className="w-full"
-                    min={new Date().toISOString().split('T')[0]}
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-[hsl(258_46%_25%)] mb-2">
-                      Start Time *
-                    </label>
-                    <Input
-                      type="time"
-                      value={proposeTime}
-                      onChange={(e) => setProposeTime(e.target.value)}
-                      className="w-full"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-[hsl(258_46%_25%)] mb-2">
-                      End Time *
-                    </label>
-                    <Input
-                      type="time"
-                      value={proposeEndTime}
-                      onChange={(e) => setProposeEndTime(e.target.value)}
-                      className="w-full"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-[hsl(258_46%_25%)] mb-2">
-                    Message to Patient (Optional)
-                  </label>
-                  <textarea
-                    value={proposeReason}
-                    onChange={(e) => setProposeReason(e.target.value)}
-                    placeholder="e.g., Doctor unavailable, emergency case priority..."
-                    className="w-full min-h-[80px] px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[hsl(258_46%_25%)] focus:border-transparent resize-none"
-                  />
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex justify-end gap-2 pt-2">
-                <Button 
-                  variant="outline" 
-                  onClick={() => {
-                    setIsProposeTimeOpen(false);
-                    setProposeAppointment(null);
-                    setProposeDate("");
-                    setProposeTime("");
-                    setProposeEndTime("");
-                    setProposeReason("");
-                  }}
-                  className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors"
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  onClick={handleSubmitProposedTime}
-                  disabled={!proposeDate || !proposeTime || !proposeEndTime || isProposing}
-                  style={{ backgroundColor: 'hsl(258, 46%, 25%)', color: 'white' }}
-                  className="cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity disabled:opacity-60"
-                >
-                  {isProposing ? "Rescheduling..." : "Reschedule"}
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      <RescheduleModal
+        open={isProposeTimeOpen}
+        onOpenChange={setIsProposeTimeOpen}
+        appointment={proposeAppointment ? {
+          id: proposeAppointment.id,
+          patientName: proposeAppointment.patientName,
+          date: proposeAppointment.date,
+          time: proposeAppointment.time,
+          doctorId: proposeAppointment.doctorId,
+          doctorName: proposeAppointment.doctorName,
+        } : null}
+        onSubmit={handleSubmitProposedTime}
+        isSubmitting={isProposing}
+      />
 
       {/* Accept Appointment Modal - Set End Time */}
       <Dialog open={isAcceptModalOpen} onOpenChange={setIsAcceptModalOpen}>
@@ -2550,39 +2880,116 @@ export default function AdminAppointmentsPage() {
           
           {acceptAppointment && (
             <div className="space-y-4 py-4">
-              {/* Patient Info */}
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-sm text-gray-600">Patient</p>
-                <p className="font-semibold text-[hsl(258_46%_25%)]">{acceptAppointment.patientName}</p>
+              {/* Appointment Summary */}
+              <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-lg border border-blue-200">
+                <h4 className="text-sm font-semibold text-[hsl(258_46%_25%)] mb-3">Appointment Details</h4>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-600">Patient:</span>
+                    <span className="text-sm font-bold text-[hsl(258_46%_25%)]">{acceptAppointment.patientName}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-600">Date:</span>
+                    <span className="text-sm font-bold text-[hsl(258_46%_25%)]">{formatDateShort(acceptAppointment.date)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-600">Start Time:</span>
+                    <span className="text-sm font-bold text-[hsl(258_46%_25%)]">{formatTime12h(acceptAppointment.time)}</span>
+                  </div>
+                </div>
               </div>
 
-              {/* Requested Date & Time */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 bg-green-50 rounded-lg border border-green-200">
-                  <p className="text-xs text-green-700 mb-1">Requested Date</p>
-                  <p className="font-medium text-green-900">{formatDateShort(acceptAppointment.date)}</p>
-                </div>
-                <div className="p-3 bg-green-50 rounded-lg border border-green-200">
-                  <p className="text-xs text-green-700 mb-1">Requested Time</p>
-                  <p className="font-medium text-green-900">{acceptAppointment.time}</p>
-                </div>
-              </div>
-
-              {/* End Time Input */}
+              {/* End Time Picker */}
               <div>
                 <label className="block text-sm font-medium text-[hsl(258_46%_25%)] mb-2">
-                  End Time *
+                  Select End Time *
                 </label>
-                <Input
-                  type="time"
-                  value={acceptEndTime}
-                  onChange={(e) => setAcceptEndTime(e.target.value)}
-                  className="w-full"
-                  placeholder="Select end time"
-                />
-                <p className="text-xs text-[hsl(258_22%_50%)] mt-1">
-                  The start time will be the patient's requested time: {acceptAppointment.time}
-                </p>
+                <div className="flex items-center gap-1.5 justify-center">
+                  <div className="relative">
+                    <select
+                      className="appearance-none px-2 py-1 pr-6 text-xs font-bold border border-[hsl(258_46%_25%)] rounded bg-white text-[hsl(258_46%_25%)] focus:outline-none focus:ring-1 focus:ring-[hsl(258_46%_25%)] cursor-pointer"
+                      onChange={(e) => {
+                        const hour12 = parseInt(e.target.value);
+                        const currentTime = acceptEndTime ? acceptEndTime.split(':') : ['10', '00'];
+                        const currentHour24 = acceptEndTime ? parseInt(currentTime[0]) : 10;
+                        const isPM = currentHour24 >= 12;
+                        
+                        let newHour24 = hour12;
+                        if (isPM) {
+                          newHour24 = hour12 === 12 ? 12 : hour12 + 12;
+                        } else {
+                          newHour24 = hour12 === 12 ? 0 : hour12;
+                        }
+                        
+                        const hourStr = String(newHour24).padStart(2, '0');
+                        setAcceptEndTime(`${hourStr}:${currentTime[1]}`);
+                      }}
+                      value={acceptEndTime ? (() => {
+                        const hour24 = parseInt(acceptEndTime.split(':')[0]);
+                        if (hour24 === 0) return '12';
+                        if (hour24 > 12) return String(hour24 - 12);
+                        return String(hour24);
+                      })() : '10'}
+                    >
+                      {[...Array(12)].map((_, i) => {
+                        const hour = i + 1;
+                        return (
+                          <option key={hour} value={String(hour)}>
+                            {String(hour).padStart(2, '0')}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <svg className="w-3 h-3 text-[hsl(258_46%_25%)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+
+                  <span className="text-sm font-bold text-[hsl(258_46%_25%)]">:</span>
+
+                  <div className="relative">
+                    <select
+                      className="appearance-none px-2 py-1 pr-6 text-xs font-bold border border-[hsl(258_46%_25%)] rounded bg-white text-[hsl(258_46%_25%)] focus:outline-none focus:ring-1 focus:ring-[hsl(258_46%_25%)] cursor-pointer"
+                      onChange={(e) => {
+                        const minute = e.target.value;
+                        const currentTime = acceptEndTime ? acceptEndTime.split(':') : ['10', '00'];
+                        const currentHour = currentTime[0];
+                        setAcceptEndTime(`${currentHour}:${minute}`);
+                      }}
+                      value={acceptEndTime ? acceptEndTime.split(':')[1] : '00'}
+                    >
+                      <option value="00">00</option>
+                      <option value="30">30</option>
+                    </select>
+                    <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <svg className="w-3 h-3 text-[hsl(258_46%_25%)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      const currentTime = acceptEndTime ? acceptEndTime.split(':') : ['10', '00'];
+                      const currentHour24 = parseInt(currentTime[0]);
+                      let newHour24;
+                      
+                      if (currentHour24 >= 12) {
+                        newHour24 = currentHour24 === 12 ? 0 : currentHour24 - 12;
+                      } else {
+                        newHour24 = currentHour24 === 0 ? 12 : currentHour24 + 12;
+                      }
+                      
+                      const hourStr = String(newHour24).padStart(2, '0');
+                      setAcceptEndTime(`${hourStr}:${currentTime[1]}`);
+                    }}
+                    className="px-3 py-1 bg-[hsl(258_46%_25%)] text-white text-xs font-bold rounded hover:bg-[hsl(258_46%_30%)] transition-colors min-w-[48px]"
+                  >
+                    {acceptEndTime && parseInt(acceptEndTime.split(':')[0]) >= 12 ? 'PM' : 'AM'}
+                  </button>
+                </div>
               </div>
 
               {/* Action Buttons */}
@@ -2599,16 +3006,91 @@ export default function AdminAppointmentsPage() {
                   Cancel
                 </Button>
                 <Button 
-                  onClick={handleAcceptAppointment}
-                  disabled={!acceptEndTime || isAccepting}
+                  onClick={handleAcceptAppointmentClick}
                   style={{ backgroundColor: 'hsl(258, 46%, 25%)', color: 'white' }}
-                  className="cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity disabled:opacity-60"
+                  className="cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity"
                 >
-                  {isAccepting ? "Accepting..." : "Accept Appointment"}
+                  Continue
                 </Button>
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Accept Appointment Confirmation Dialog */}
+      <Dialog open={isAcceptConfirmOpen} onOpenChange={setIsAcceptConfirmOpen}>
+        <DialogContent className="sm:max-w-[480px] bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-[hsl(258_46%_25%)]">
+              Confirm Appointment Acceptance
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            {/* Appointment Schedule Summary */}
+            {acceptAppointment && (
+              <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-lg border border-blue-200">
+                <h4 className="text-sm font-semibold text-[hsl(258_46%_25%)] mb-3">Appointment Schedule</h4>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-600">Patient:</span>
+                    <span className="text-sm font-bold text-[hsl(258_46%_25%)]">{acceptAppointment.patientName}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-600">Date:</span>
+                    <span className="text-sm font-bold text-[hsl(258_46%_25%)]">{formatDateShort(acceptAppointment.date)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-600">Start Time:</span>
+                    <span className="text-sm font-bold text-[hsl(258_46%_25%)]">{formatTime12h(acceptAppointment.time)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-600">End Time:</span>
+                    <span className="text-sm font-bold text-[hsl(258_46%_25%)]">{acceptEndTime ? formatTime12h(acceptEndTime) : 'Not selected'}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Note to Patient Field */}
+            <div>
+              <label className="text-sm font-medium text-[hsl(258_46%_25%)] mb-2 block">
+                Note to Patient (Optional)
+              </label>
+              <textarea
+                value={acceptFeedback}
+                onChange={(e) => setAcceptFeedback(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-[hsl(258_46%_25%)] placeholder:text-[hsl(258_22%_50%)]"
+                rows={3}
+                placeholder="Add any notes that the patient should see..."
+              />
+              <p className="text-xs text-[hsl(258_22%_50%)] mt-1">
+                This note will be visible to the patient in their appointment history.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4">
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setIsAcceptConfirmOpen(false);
+                setIsAcceptModalOpen(true);
+              }} 
+              className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]"
+            >
+              Back
+            </Button>
+            <Button 
+              onClick={handleAcceptAppointmentConfirm} 
+              disabled={isAccepting}
+              style={{ backgroundColor: 'hsl(258, 46%, 25%)', color: 'white' }} 
+              className="cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity transition-transform duration-200 ease-in-out active:scale-[0.97] disabled:opacity-60"
+            >
+              {isAccepting ? "Accepting..." : "Confirm"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -2968,5 +3450,6 @@ export default function AdminAppointmentsPage() {
         </DialogContent>
       </Dialog>
     </div>
+    </>
   );
 }
