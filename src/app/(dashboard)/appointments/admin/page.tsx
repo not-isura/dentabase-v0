@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import CalendarRange from "@/components/ui/calendar-range";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { NewAppointmentModal } from "@/components/NewAppointmentModal";
+import { AdminNewAppointmentModal } from "@/components/AdminNewAppointmentModal";
 import RescheduleModal from "@/components/RescheduleModal";
 import { StatusFlowGuide } from "@/components/StatusFlowGuide";
 import { createClient } from "@/lib/supabase/client";
@@ -420,7 +420,7 @@ export default function AdminAppointmentsPage() {
         // Dentist can only see their own patients
         const { data: doctorData, error: doctorError } = await supabase
           .from('doctors')
-          .select('doctor_id')
+          .select('doctor_id, users!inner(first_name, last_name)')
           .eq('user_id', userData.user_id)
           .single();
 
@@ -432,13 +432,16 @@ export default function AdminAppointmentsPage() {
         }
 
         console.log('Filtering by doctor_id:', doctorData.doctor_id);
+        setCurrentUserDoctorId(doctorData.doctor_id);
+        const doctorUser = doctorData.users as any;
+        setCurrentUserDoctorName(`Dr. ${doctorUser.last_name}`);
         query = query.eq('doctor_id', doctorData.doctor_id);
 
       } else if (userData.role === 'staff') {
         // Staff can only see their doctor's patients
         const { data: staffData, error: staffError } = await supabase
           .from('staff')
-          .select('doctor_id')
+          .select('doctor_id, doctors!inner(users!inner(first_name, last_name))')
           .eq('user_id', userData.user_id)
           .single();
 
@@ -450,6 +453,10 @@ export default function AdminAppointmentsPage() {
         }
 
         console.log('Filtering by staff\'s doctor_id:', staffData.doctor_id);
+        setCurrentUserDoctorId(staffData.doctor_id);
+        const staffDoctor = staffData.doctors as any;
+        const staffDoctorUser = staffDoctor.users as any;
+        setCurrentUserDoctorName(`Dr. ${staffDoctorUser.last_name}`);
         query = query.eq('doctor_id', staffData.doctor_id);
       }
       // Admin can see all appointments (no additional filter)
@@ -995,6 +1002,8 @@ export default function AdminAppointmentsPage() {
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
   const [isNewAppointmentOpen, setIsNewAppointmentOpen] = useState(false);
+  const [currentUserDoctorId, setCurrentUserDoctorId] = useState<string>('');
+  const [currentUserDoctorName, setCurrentUserDoctorName] = useState<string>('');
   const [appointmentNotes, setAppointmentNotes] = useState("");
   type ActionType = "accept" | "arrive" | "ongoing" | "complete" | "reject" | "cancel";
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
@@ -3162,10 +3171,12 @@ export default function AdminAppointmentsPage() {
       </Dialog>
 
       {/* New Appointment Modal */}
-      <NewAppointmentModal
-        isOpen={isNewAppointmentOpen}
-        onClose={() => setIsNewAppointmentOpen(false)}
-        onSave={handleNewAppointment}
+      <AdminNewAppointmentModal
+        open={isNewAppointmentOpen}
+        onOpenChange={setIsNewAppointmentOpen}
+        onSuccess={fetchAppointments}
+        doctorId={currentUserDoctorId}
+        doctorName={currentUserDoctorName}
       />
 
       {/* Day Appointments Modal */}
