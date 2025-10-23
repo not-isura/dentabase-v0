@@ -437,7 +437,7 @@ export default function AdminAppointmentsPage() {
         setCurrentUserDoctorName(`Dr. ${doctorUser.last_name}`);
         query = query.eq('doctor_id', doctorData.doctor_id);
 
-      } else if (userData.role === 'staff') {
+      } else if (userData.role === 'staff' || userData.role === 'dental_staff') {
         // Staff can only see their doctor's patients
         const { data: staffData, error: staffError } = await supabase
           .from('staff')
@@ -452,12 +452,23 @@ export default function AdminAppointmentsPage() {
           return;
         }
 
-        console.log('Filtering by staff\'s doctor_id:', staffData.doctor_id);
+        // CRITICAL: Ensure doctor_id exists and is valid
+        if (!staffData.doctor_id) {
+          console.error('Staff member has no assigned doctor_id:', userData.user_id);
+          setError('Staff member not assigned to any doctor. Please contact admin.');
+          setIsLoadingAppointments(false);
+          return;
+        }
+
+        console.log('✅ Filtering appointments by staff\'s doctor_id:', staffData.doctor_id);
         setCurrentUserDoctorId(staffData.doctor_id);
         const staffDoctor = staffData.doctors as any;
         const staffDoctorUser = staffDoctor.users as any;
         setCurrentUserDoctorName(`Dr. ${staffDoctorUser.last_name}`);
+        
+        // Apply doctor_id filter to query
         query = query.eq('doctor_id', staffData.doctor_id);
+        console.log('✅ Query filter applied for doctor_id:', staffData.doctor_id);
       }
       // Admin can see all appointments (no additional filter)
 
@@ -516,6 +527,17 @@ export default function AdminAppointmentsPage() {
           start.setMinutes(start.getMinutes() + 60);
           return start.toISOString();
         };
+
+        // Format date using LOCAL timezone (not UTC) to prevent date shifting
+        const year = displayDate.getFullYear();
+        const month = String(displayDate.getMonth() + 1).padStart(2, '0');
+        const day = String(displayDate.getDate()).padStart(2, '0');
+        const localDateString = `${year}-${month}-${day}`;
+
+        // Format time using local hours/minutes
+        const hours = String(displayDate.getHours()).padStart(2, '0');
+        const minutes = String(displayDate.getMinutes()).padStart(2, '0');
+        const localTimeString = `${hours}:${minutes}`;
         
         return {
           id: apt.appointment_id,
@@ -526,8 +548,8 @@ export default function AdminAppointmentsPage() {
           patientPhone: apt.patient?.users?.phone_number || 'N/A',
           emergencyContactName: apt.patient?.emergency_contact_name || 'N/A',
           emergencyContactNumber: apt.patient?.emergency_contact_no || 'N/A',
-          date: displayDate.toISOString().split('T')[0],
-          time: displayDate.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+          date: localDateString,
+          time: localTimeString,
           service: apt.concern || 'General Consultation',
           concern: apt.concern || 'N/A',
           status: apt.status,
