@@ -560,6 +560,11 @@ export default function ScheduleSelectionModal({
           </div>
         </div>
 
+            {selectedDay && selectedSlot && (
+              <p className="mt-1 mb-0.5 text-[11px] leading-tight text-gray-500 italic">
+                Note: The final appointment duration may change once the clinic confirms your request.
+              </p>
+            )}
         {/* Scrollable Calendar Area */}
         <div className="flex-1 overflow-y-auto pt-0.5 pb-2">
           {/* Weekly Calendar Grid */}
@@ -751,6 +756,44 @@ export default function ScheduleSelectionModal({
                                 );
                               });
                             })()}
+
+                            {/* Selected Slot Preview (1-hour sample) */}
+                            {selectedDay && selectedSlot && currentValidation.isValid &&
+                              formatLocalDate(date) === selectedSlot.date && (() => {
+                                const [startHour, startMin] = selectedSlot.time.split(':').map(Number);
+                                const startTotalMinutes = startHour * 60 + startMin;
+                                const previewDurationMinutes = 60;
+                                const endTotalMinutes = startTotalMinutes + previewDurationMinutes;
+                                const endHour = Math.floor(endTotalMinutes / 60);
+                                const endMin = endTotalMinutes % 60;
+
+                                const topOffset = ((startHour - 6) * 48) + ((startMin / 60) * 48);
+                                const height = (previewDurationMinutes / 60) * 48;
+
+                                const startTimeStr = selectedSlot.time;
+                                const endTimeStr = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
+
+                                return (
+                                  <div
+                                    className="absolute bg-purple-200/50 border-2 border-[hsl(258_46%_40%)] rounded-lg p-2 pointer-events-none z-20"
+                                    style={{
+                                      top: `${topOffset + 4}px`,
+                                      left: '8px',
+                                      right: '8px',
+                                      height: `${height - 8}px`,
+                                    }}
+                                  >
+                                    <div className="flex flex-col h-full justify-center">
+                                      <span className="text-[9px] font-bold text-[hsl(258_46%_30%)] uppercase tracking-wide">
+                                        Requested Slot
+                                      </span>
+                                      <p className="text-[10px] font-semibold text-[hsl(258_46%_25%)] mt-0.5">
+                                        {formatTime(startTimeStr)} - {formatTime(endTimeStr)}
+                                      </p>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                           </>
                         )}
                       </div>
