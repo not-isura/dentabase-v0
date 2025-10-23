@@ -2149,8 +2149,11 @@ export default function AdminAppointmentsPage() {
                   today.setHours(0, 0, 0, 0);
                   const isPast = date < today;
                   
-                  // Filter appointments for this day (exclude cancelled)
-                  const dayAppointments = appointments.filter((apt) => apt.date === dateStr && apt.status !== 'cancelled');
+                  // Filter appointments for this day - ONLY show confirmed appointments that occupy time slots
+                  const dayAppointments = appointments.filter((apt) => 
+                    apt.date === dateStr && 
+                    ['booked', 'arrived', 'ongoing', 'completed'].includes(apt.status)
+                  );
                   
                   // Get doctor availability for this date
                   const availability = getAvailabilityForDate(date);
@@ -2281,6 +2284,97 @@ export default function AdminAppointmentsPage() {
                 })}
               </div>
             </div>
+
+            {/* Pending/Non-blocking Appointments Section */}
+            {(() => {
+              // Get all pending appointments for the current week (requested, proposed, rejected, cancelled)
+              const weekDays = getWeekDays(currentWeekStart);
+              const pendingAppointments = appointments.filter((apt) => {
+                const aptDate = weekDays.find(date => formatLocalDate(date) === apt.date);
+                return aptDate && ['requested', 'proposed', 'rejected', 'cancelled'].includes(apt.status);
+              });
+
+              if (pendingAppointments.length === 0) return null;
+
+              return (
+                <div className="mt-6 border border-gray-200 rounded-lg bg-gray-50 p-4 shadow-sm">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="flex items-center gap-1.5">
+                      <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <h3 className="text-sm font-bold text-gray-700">Pending Requests & Other Statuses</h3>
+                    </div>
+                    <span className="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-semibold">
+                      {pendingAppointments.length}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-600 mb-3">These appointments do not occupy time slots on the calendar</p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {pendingAppointments.map((appointment) => {
+                      const statusColors = {
+                        requested: 'bg-blue-50 border-blue-200 text-blue-900',
+                        proposed: 'bg-amber-50 border-amber-200 text-amber-900',
+                        rejected: 'bg-orange-50 border-orange-200 text-orange-900',
+                        cancelled: 'bg-red-50 border-red-200 text-red-900',
+                      };
+                      
+                      const statusBadgeColors = {
+                        requested: 'bg-blue-100 text-blue-800',
+                        proposed: 'bg-amber-100 text-amber-800',
+                        rejected: 'bg-orange-100 text-orange-800',
+                        cancelled: 'bg-red-100 text-red-800',
+                      };
+                      
+                      const colorClass = statusColors[appointment.status as keyof typeof statusColors] || 'bg-gray-50 border-gray-200 text-gray-900';
+                      const badgeClass = statusBadgeColors[appointment.status as keyof typeof statusBadgeColors] || 'bg-gray-100 text-gray-800';
+                      
+                      return (
+                        <div
+                          key={appointment.id}
+                          onClick={() => handleAppointmentClick(appointment)}
+                          className={`${colorClass} border-2 rounded-lg p-2.5 cursor-pointer hover:shadow-md transition-all duration-200`}
+                        >
+                          <div className="flex items-start justify-between gap-2 mb-1.5">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold truncate">{appointment.patientName}</p>
+                              <p className="text-[10px] text-gray-600 truncate mt-0.5">{appointment.patientPhone}</p>
+                            </div>
+                            <span className={`${badgeClass} text-[9px] font-bold uppercase px-1.5 py-0.5 rounded tracking-wide flex-shrink-0`}>
+                              {appointment.status}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[10px] text-gray-700 mt-1.5">
+                            <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            <span className="font-medium">
+                              {(() => {
+                                const aptDate = new Date(appointment.date + 'T' + appointment.time);
+                                return aptDate.toLocaleDateString('en-US', { 
+                                  weekday: 'long', 
+                                  month: 'long', 
+                                  day: 'numeric', 
+                                  year: 'numeric' 
+                                }) + ' at ' + aptDate.toLocaleTimeString('en-US', { 
+                                  hour: 'numeric', 
+                                  minute: '2-digit', 
+                                  hour12: true 
+                                });
+                              })()}
+                            </span>
+                          </div>
+                          {appointment.concern && (
+                            <p className="text-[10px] text-gray-600 mt-1.5 line-clamp-1 italic">"{appointment.concern}"</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
       )}
