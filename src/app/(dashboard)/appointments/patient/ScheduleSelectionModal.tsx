@@ -335,6 +335,145 @@ export default function ScheduleSelectionModal({
     }
   };
 
+  // Validation: Check if selected time is valid
+  const validateSelectedTime = useCallback((date: Date, time: string): { isValid: boolean; errorMessage: string } => {
+    if (!date || !time) {
+      return { isValid: false, errorMessage: '' };
+    }
+
+    const availability = getDayAvailability(date);
+    if (!availability) {
+      return { isValid: false, errorMessage: 'No availability for this day' };
+    }
+
+    // Parse selected time
+    const [selectedHour, selectedMin] = time.split(':').map(Number);
+    const selectedTimeInMinutes = selectedHour * 60 + selectedMin;
+
+    // Parse doctor's working hours
+    const [startHour, startMin] = availability.startTime.split(':').map(Number);
+    const [endHour, endMin] = availability.endTime.split(':').map(Number);
+    const workStartInMinutes = startHour * 60 + startMin;
+    const workEndInMinutes = endHour * 60 + endMin;
+
+    // 1. Check if start time is within working hours (can equal start, cannot equal end)
+    if (selectedTimeInMinutes < workStartInMinutes) {
+      return { 
+        isValid: false, 
+        errorMessage: `Time must be at or after ${formatTime(availability.startTime)}` 
+      };
+    }
+    
+    if (selectedTimeInMinutes >= workEndInMinutes) {
+      return { 
+        isValid: false, 
+        errorMessage: `Time must be before ${formatTime(availability.endTime)}` 
+      };
+    }
+
+    // 2. Check if there's at least 1 hour before closing time
+    const requestedEndTimeInMinutes = selectedTimeInMinutes + 60; // 1 hour duration
+    if (requestedEndTimeInMinutes > workEndInMinutes) {
+      // Calculate the latest possible start time (1 hour before closing)
+      const latestStartInMinutes = workEndInMinutes - 60;
+      const latestStartHour = Math.floor(latestStartInMinutes / 60);
+      const latestStartMin = latestStartInMinutes % 60;
+      const latestStartTime = `${String(latestStartHour).padStart(2, '0')}:${String(latestStartMin).padStart(2, '0')}`;
+      
+      return { 
+        isValid: false, 
+        errorMessage: `Not enough time before closing. Latest start time: ${formatTime(latestStartTime)}` 
+      };
+    }
+
+    // 3. Check for collision with existing appointments
+    const dateStr = formatLocalDate(date);
+    const conflictingAppointments = bookedAppointments.filter((appointment) => {
+      const appointmentDate = new Date(appointment.booked_start_time);
+      const appointmentDateStr = formatLocalDate(appointmentDate);
+      
+      // Only check appointments on the same day
+      if (appointmentDateStr !== dateStr) return false;
+
+      const appointmentStartTime = new Date(appointment.booked_start_time);
+      const appointmentEndTime = new Date(appointment.booked_end_time);
+      
+      const appointmentStartHour = appointmentStartTime.getHours();
+      const appointmentStartMin = appointmentStartTime.getMinutes();
+      const appointmentEndHour = appointmentEndTime.getHours();
+      const appointmentEndMin = appointmentEndTime.getMinutes();
+      
+      const appointmentStartInMinutes = appointmentStartHour * 60 + appointmentStartMin;
+      const appointmentEndInMinutes = appointmentEndHour * 60 + appointmentEndMin;
+
+      // Check if the requested time slot (start to start+60min) overlaps with this appointment
+      // Overlap occurs if: requestedStart < appointmentEnd AND requestedEnd > appointmentStart
+      return selectedTimeInMinutes < appointmentEndInMinutes && requestedEndTimeInMinutes > appointmentStartInMinutes;
+    });
+
+    if (conflictingAppointments.length > 0) {
+      return { 
+        isValid: false, 
+        errorMessage: 'This time conflicts with an existing appointment' 
+      };
+    }
+
+    // 4. Check if there's at least 1 hour of free time before the next appointment
+    // Find the next appointment after the requested time
+    const nextAppointments = bookedAppointments
+      .filter((appointment) => {
+        const appointmentDate = new Date(appointment.booked_start_time);
+        const appointmentDateStr = formatLocalDate(appointmentDate);
+        if (appointmentDateStr !== dateStr) return false;
+
+        const appointmentStartTime = new Date(appointment.booked_start_time);
+        const appointmentStartHour = appointmentStartTime.getHours();
+        const appointmentStartMin = appointmentStartTime.getMinutes();
+        const appointmentStartInMinutes = appointmentStartHour * 60 + appointmentStartMin;
+
+        // Only consider appointments that start after the requested time
+        return appointmentStartInMinutes > selectedTimeInMinutes;
+      })
+      .sort((a, b) => {
+        const aStart = new Date(a.booked_start_time);
+        const bStart = new Date(b.booked_start_time);
+        return aStart.getTime() - bStart.getTime();
+      });
+
+    if (nextAppointments.length > 0) {
+      const nextAppointment = nextAppointments[0];
+      const nextStartTime = new Date(nextAppointment.booked_start_time);
+      const nextStartHour = nextStartTime.getHours();
+      const nextStartMin = nextStartTime.getMinutes();
+      const nextStartInMinutes = nextStartHour * 60 + nextStartMin;
+
+      // Check if there's at least 1 hour before the next appointment
+      if (requestedEndTimeInMinutes > nextStartInMinutes) {
+        // Calculate the latest possible start time before this appointment
+        const latestStartInMinutes = nextStartInMinutes - 60;
+        const latestStartHour = Math.floor(latestStartInMinutes / 60);
+        const latestStartMin = latestStartInMinutes % 60;
+        const latestStartTime = `${String(latestStartHour).padStart(2, '0')}:${String(latestStartMin).padStart(2, '0')}`;
+        
+        return { 
+          isValid: false, 
+          errorMessage: `Not enough time before next appointment. Latest start time: ${formatTime(latestStartTime)}` 
+        };
+      }
+    }
+
+    // All validations passed
+    return { isValid: true, errorMessage: '' };
+  }, [getDayAvailability, bookedAppointments]);
+
+  // Get current validation state
+  const currentValidation = useMemo(() => {
+    if (!selectedDay || !selectedSlot) {
+      return { isValid: false, errorMessage: '' };
+    }
+    return validateSelectedTime(selectedDay, selectedSlot.time);
+  }, [selectedDay, selectedSlot, validateSelectedTime]);
+
   const handleNext = () => {
     if (selectedSlot && onScheduleSelect) {
       onScheduleSelect({ 
@@ -737,6 +876,30 @@ export default function ScheduleSelectionModal({
                 </button>
               </div>
             </div>
+
+            {/* Validation Feedback */}
+            {!currentValidation.isValid && currentValidation.errorMessage && (
+              <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                <svg className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-xs text-red-700 font-medium leading-relaxed">
+                  {currentValidation.errorMessage}
+                </p>
+              </div>
+            )}
+
+            {/* Success Feedback */}
+            {currentValidation.isValid && (
+              <div className="mt-3 p-2 bg-green-50 border border-green-200 rounded-lg flex items-start gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                <svg className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <p className="text-xs text-green-700 font-medium leading-relaxed">
+                  Time slot available!
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -750,7 +913,7 @@ export default function ScheduleSelectionModal({
           </Button>
           <Button
             onClick={handleNext}
-            disabled={!selectedDay}
+            disabled={!selectedDay || !currentValidation.isValid}
             className="bg-[hsl(258_46%_25%)] text-white hover:bg-[hsl(258_46%_30%)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Next
