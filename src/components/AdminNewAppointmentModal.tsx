@@ -277,6 +277,17 @@ export function AdminNewAppointmentModal({
           console.error('Error fetching appointments:', error);
           setBookedAppointments([]);
         } else {
+          console.log('📋 ALL FETCHED APPOINTMENTS FOR VALIDATION:', {
+            doctorId,
+            totalAppointments: data?.length || 0,
+            appointments: data?.map(apt => ({
+              appointment_id: apt.appointment_id,
+              status: apt.status,
+              booked_start_time: apt.booked_start_time,
+              booked_end_time: apt.booked_end_time,
+              requested_start_time: apt.requested_start_time
+            }))
+          });
           setBookedAppointments(data || []);
         }
       } catch (err) {
@@ -302,6 +313,157 @@ export function AdminNewAppointmentModal({
     setCurrentWeekStart(getWeekStart(today));
     setShowConfirmDialog(false);
   };
+
+  // Validation: Check if selected time range is valid
+  const validateSelectedTime = useCallback((date: Date | null, startTime: string, endTime: string): { isValid: boolean; errorMessage: string } => {
+    if (!date || !startTime || !endTime) {
+      return { isValid: false, errorMessage: '' };
+    }
+
+    // Get doctor availability for the selected day
+    const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+    const availability = doctorAvailability.find((avail) => avail.day === dayName);
+    
+    if (!availability) {
+      return { isValid: false, errorMessage: 'No availability for this day' };
+    }
+
+    // Parse times to minutes for comparison
+    const [startHour, startMin] = startTime.split(':').map(Number);
+    const [endHour, endMin] = endTime.split(':').map(Number);
+    const startTimeInMinutes = startHour * 60 + startMin;
+    const endTimeInMinutes = endHour * 60 + endMin;
+
+    // Parse doctor's working hours
+    const [docStartHour, docStartMin] = availability.startTime.split(':').map(Number);
+    const [docEndHour, docEndMin] = availability.endTime.split(':').map(Number);
+    const docStartInMinutes = docStartHour * 60 + docStartMin;
+    const docEndInMinutes = docEndHour * 60 + docEndMin;
+
+    // 1. Check if end time is after start time
+    if (endTimeInMinutes <= startTimeInMinutes) {
+      return { 
+        isValid: false, 
+        errorMessage: 'End time must be after start time' 
+      };
+    }
+
+    // 2. Check minimum duration (30 minutes)
+    const durationInMinutes = endTimeInMinutes - startTimeInMinutes;
+    if (durationInMinutes < 30) {
+      return { 
+        isValid: false, 
+        errorMessage: 'Appointment duration must be at least 30 minutes' 
+      };
+    }
+
+    // 3. Check if start time is within working hours
+    if (startTimeInMinutes < docStartInMinutes) {
+      return { 
+        isValid: false, 
+        errorMessage: `Start time must be at or after ${formatTime(availability.startTime)}` 
+      };
+    }
+
+    // 4. Check if end time is within working hours
+    if (endTimeInMinutes > docEndInMinutes) {
+      return { 
+        isValid: false, 
+        errorMessage: `End time must be at or before ${formatTime(availability.endTime)}` 
+      };
+    }
+
+    // 5. Check for collision with existing appointments
+    const dateStr = formatLocalDate(date);
+    
+    console.log('🔍 Validation Debug:', {
+      selectedDate: dateStr,
+      selectedStartTime: startTime,
+      selectedEndTime: endTime,
+      startTimeInMinutes,
+      endTimeInMinutes,
+      totalBookedAppointments: bookedAppointments.length
+    });
+    
+    const conflictingAppointments = bookedAppointments.filter((appointment) => {
+      // Skip appointments without booked times
+      if (!appointment.booked_start_time || !appointment.booked_end_time) return false;
+      
+      const appointmentDate = new Date(appointment.booked_start_time);
+      const appointmentDateStr = formatLocalDate(appointmentDate);
+      
+      // Only check appointments on the same day
+      if (appointmentDateStr !== dateStr) return false;
+
+      const appointmentStartTime = new Date(appointment.booked_start_time);
+      const appointmentEndTime = new Date(appointment.booked_end_time);
+      
+      const appointmentStartHour = appointmentStartTime.getHours();
+      const appointmentStartMin = appointmentStartTime.getMinutes();
+      const appointmentEndHour = appointmentEndTime.getHours();
+      const appointmentEndMin = appointmentEndTime.getMinutes();
+      
+      const appointmentStartInMinutes = appointmentStartHour * 60 + appointmentStartMin;
+      const appointmentEndInMinutes = appointmentEndHour * 60 + appointmentEndMin;
+
+      const hasOverlap = startTimeInMinutes < appointmentEndInMinutes && endTimeInMinutes > appointmentStartInMinutes;
+      
+      console.log('  📅 Checking appointment:', {
+        appointmentId: appointment.appointment_id,
+        appointmentDate: appointmentDateStr,
+        appointmentStart: `${appointmentStartHour}:${appointmentStartMin.toString().padStart(2, '0')}`,
+        appointmentEnd: `${appointmentEndHour}:${appointmentEndMin.toString().padStart(2, '0')}`,
+        appointmentStartInMinutes,
+        appointmentEndInMinutes,
+        hasOverlap
+      });
+
+      // Check if the selected time slot overlaps with this appointment
+      // Overlap occurs if: newStart < existingEnd AND newEnd > existingStart
+      return hasOverlap;
+    });
+    
+    console.log('❌ Conflicting appointments found:', conflictingAppointments.length);
+
+    if (conflictingAppointments.length > 0) {
+      // Show details of ALL conflicting appointments
+      console.log('🚨 CONFLICTING APPOINTMENTS DETAILS:');
+      conflictingAppointments.forEach((conflict, index) => {
+        console.log(`\n  Conflict #${index + 1}:`, {
+          appointment_id: conflict.appointment_id,
+          status: conflict.status,
+          booked_start_time: conflict.booked_start_time,
+          booked_end_time: conflict.booked_end_time,
+          requested_start_time: conflict.requested_start_time,
+          'Database Query': `SELECT * FROM appointments WHERE appointment_id = '${conflict.appointment_id}';`
+        });
+      });
+      
+      // Show details of the first conflicting appointment
+      const firstConflict = conflictingAppointments[0];
+      const conflictStart = new Date(firstConflict.booked_start_time!);
+      const conflictEnd = new Date(firstConflict.booked_end_time!);
+      
+      const conflictStartStr = `${conflictStart.getHours()}:${conflictStart.getMinutes().toString().padStart(2, '0')}`;
+      const conflictEndStr = `${conflictEnd.getHours()}:${conflictEnd.getMinutes().toString().padStart(2, '0')}`;
+      
+      return { 
+        isValid: false, 
+        errorMessage: 'Conflicts with existing appointment' 
+      };
+    }
+
+    // All validations passed
+    return { isValid: true, errorMessage: '' };
+  }, [doctorAvailability, bookedAppointments]);
+
+  // Get current validation state
+  const currentValidation = useMemo(() => {
+    if (!selectedDay || !selectedTime || !selectedEndTime) {
+      return { isValid: false, errorMessage: '' };
+    }
+    return validateSelectedTime(selectedDay, selectedTime, selectedEndTime);
+  }, [selectedDay, selectedTime, selectedEndTime, validateSelectedTime]);
 
   const loadDoctorInfo = async () => {
     if (initialDoctorId && initialDoctorName) {
@@ -758,6 +920,84 @@ export function AdminNewAppointmentModal({
                           );
                         })()}
 
+                        {/* Booked Appointments overlay */}
+                        {bookedAppointments
+                          .filter((apt) => {
+                            if (!apt.booked_start_time) return false;
+                            const aptDate = new Date(apt.booked_start_time);
+                            return formatLocalDate(aptDate) === formatLocalDate(date);
+                          })
+                          .map((apt) => {
+                            const startTime = new Date(apt.booked_start_time!);
+                            const endTime = new Date(apt.booked_end_time!);
+                            
+                            const startHour = startTime.getHours();
+                            const startMin = startTime.getMinutes();
+                            const endHour = endTime.getHours();
+                            const endMin = endTime.getMinutes();
+                            
+                            const topOffset = ((startHour - 6) * 48) + ((startMin / 60) * 48);
+                            const durationHours = (endHour - startHour) + ((endMin - startMin) / 60);
+                            const height = durationHours * 48;
+                            
+                            const startTimeStr = `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}`;
+                            const endTimeStr = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
+                            
+                            return (
+                              <div
+                                key={apt.appointment_id}
+                                className="absolute bg-red-100 border-2 border-red-300 rounded-lg p-2 pointer-events-auto z-10"
+                                style={{
+                                  top: `${topOffset + 4}px`,
+                                  left: '8px',
+                                  right: '8px',
+                                  height: `${height - 8}px`,
+                                }}
+                              >
+                                <div className="flex flex-col h-full justify-center">
+                                  <span className="text-[10px] font-bold text-red-700 uppercase tracking-wide">
+                                    Occupied
+                                  </span>
+                                  <p className="text-xs font-semibold text-red-800 mt-0.5">
+                                    {formatTime(startTimeStr)} - {formatTime(endTimeStr)}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                        {/* New Appointment Preview */}
+                        {selectedDay && selectedTime && selectedEndTime && currentValidation.isValid && 
+                         formatLocalDate(date) === formatLocalDate(selectedDay) && (() => {
+                          const [startHour, startMin] = selectedTime.split(':').map(Number);
+                          const [endHour, endMin] = selectedEndTime.split(':').map(Number);
+
+                          const topOffset = ((startHour - 6) * 48) + ((startMin / 60) * 48);
+                          const durationHours = (endHour - startHour) + ((endMin - startMin) / 60);
+                          const height = durationHours * 48;
+
+                          return (
+                            <div
+                              className="absolute bg-purple-200/50 border-2 border-[hsl(258_46%_40%)] rounded-lg p-2 pointer-events-none z-20"
+                              style={{
+                                top: `${topOffset + 4}px`,
+                                left: '8px',
+                                right: '8px',
+                                height: `${height - 8}px`,
+                              }}
+                            >
+                              <div className="flex flex-col h-full justify-center">
+                                <span className="text-[9px] font-bold text-[hsl(258_46%_30%)] uppercase tracking-wide">
+                                  New Appointment
+                                </span>
+                                <p className="text-[10px] font-semibold text-[hsl(258_46%_25%)] mt-0.5">
+                                  {formatTime(selectedTime)} - {formatTime(selectedEndTime)}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
                         {/* Overlay content */}
                         <div className="absolute inset-0 pointer-events-none">
                           {isPast ? (
@@ -998,6 +1238,33 @@ export function AdminNewAppointmentModal({
                       </div>
                     </div>
                   </div>
+
+                  {/* Validation Feedback */}
+                  {selectedDay && selectedTime && selectedEndTime && (
+                    <div className="mt-3">
+                      {!currentValidation.isValid && currentValidation.errorMessage && (
+                        <div className="p-2 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                          <svg className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <p className="text-xs text-red-700 font-medium leading-relaxed">
+                            {currentValidation.errorMessage}
+                          </p>
+                        </div>
+                      )}
+
+                      {currentValidation.isValid && (
+                        <div className="p-2 bg-green-50 border border-green-200 rounded-lg flex items-start gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                          <svg className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                          <p className="text-xs text-green-700 font-medium leading-relaxed">
+                            Time slot available!
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1014,7 +1281,7 @@ export function AdminNewAppointmentModal({
               </Button>
               <Button
                 onClick={handleContinueToConfirm}
-                disabled={!selectedDay || !selectedTime}
+                disabled={!selectedDay || !selectedTime || !currentValidation.isValid}
                 className="bg-[hsl(258_46%_25%)] text-white hover:bg-[hsl(258_46%_30%)] disabled:opacity-50"
               >
                 Continue

@@ -287,6 +287,95 @@ export default function RescheduleModal({
     });
   }, [bookedAppointments]);
 
+  // Validation logic for reschedule times
+  const currentValidation = useMemo(() => {
+    if (!selectedSlot || !selectedEndTime || !selectedDay) {
+      return { isValid: false, message: '' };
+    }
+
+    const startTime = selectedSlot.time;
+    const endTime = selectedEndTime;
+
+    // Convert times to minutes for easier comparison
+    const [startHour, startMin] = startTime.split(':').map(Number);
+    const [endHour, endMin] = endTime.split(':').map(Number);
+    const startMinutes = startHour * 60 + startMin;
+    const endMinutes = endHour * 60 + endMin;
+
+    // Rule 1: End time must be after start time
+    if (endMinutes <= startMinutes) {
+      return {
+        isValid: false,
+        message: 'End time must be after start time'
+      };
+    }
+
+    // Rule 2: Minimum 1-hour duration
+    const durationMinutes = endMinutes - startMinutes;
+    if (durationMinutes < 60) {
+      return {
+        isValid: false,
+        message: 'Appointment duration must be at least 1 hour'
+      };
+    }
+
+    // Rule 3: Check if within doctor's availability
+    const availability = getDayAvailability(selectedDay);
+    if (availability) {
+      const [availStartHour, availStartMin] = availability.startTime.split(':').map(Number);
+      const [availEndHour, availEndMin] = availability.endTime.split(':').map(Number);
+      const availStartMinutes = availStartHour * 60 + availStartMin;
+      const availEndMinutes = availEndHour * 60 + availEndMin;
+
+      if (startMinutes < availStartMinutes || endMinutes > availEndMinutes) {
+        return {
+          isValid: false,
+          message: `Time must be within doctor's availability (${formatTime(availability.startTime)} - ${formatTime(availability.endTime)})`
+        };
+      }
+    }
+
+    // Rule 4: Check for collision with other appointments
+    const dateStr = formatLocalDate(selectedDay);
+    for (const appt of bookedAppointments) {
+      // Skip the current appointment being rescheduled
+      if (appointment && appt.appointment_id === appointment.id) continue;
+
+      const appointmentDate = new Date(appt.booked_start_time);
+      const appointmentDateStr = formatLocalDate(appointmentDate);
+
+      if (appointmentDateStr !== dateStr) continue;
+
+      const bookedStart = new Date(appt.booked_start_time);
+      const bookedEnd = new Date(appt.booked_end_time);
+
+      const bookedStartMinutes = bookedStart.getHours() * 60 + bookedStart.getMinutes();
+      const bookedEndMinutes = bookedEnd.getHours() * 60 + bookedEnd.getMinutes();
+
+      // Check overlap: newStart < bookedEnd AND newEnd > bookedStart
+      if (startMinutes < bookedEndMinutes && endMinutes > bookedStartMinutes) {
+        return {
+          isValid: false,
+          message: 'Time conflicts with another appointment'
+        };
+      }
+    }
+
+    // Rule 5: Cannot reschedule to the past
+    const now = new Date();
+    const selectedDateTime = new Date(selectedDay);
+    selectedDateTime.setHours(startHour, startMin, 0, 0);
+    
+    if (selectedDateTime < now) {
+      return {
+        isValid: false,
+        message: 'Cannot reschedule to a past time'
+      };
+    }
+
+    return { isValid: true, message: 'Time slot available!' };
+  }, [selectedSlot, selectedEndTime, selectedDay, bookedAppointments, getDayAvailability, appointment]);
+
   const handlePreviousWeek = () => {
     const newWeekStart = new Date(currentWeekStart);
     newWeekStart.setDate(currentWeekStart.getDate() - 7);
@@ -575,6 +664,38 @@ export default function RescheduleModal({
                           </div>
                           <div className="absolute -bottom-5 right-1 bg-green-100 px-1.5 py-0.5 rounded text-[9px] font-bold text-green-700 shadow-sm">
                             {formatTime(availability.endTime)}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Rescheduled Appointment Preview */}
+                    {selectedDay && selectedSlot && selectedEndTime && currentValidation.isValid && 
+                     formatLocalDate(date) === formatLocalDate(selectedDay) && (() => {
+                      const [startHour, startMin] = selectedSlot.time.split(':').map(Number);
+                      const [endHour, endMin] = selectedEndTime.split(':').map(Number);
+
+                      const topOffset = ((startHour - 6) * 48) + ((startMin / 60) * 48);
+                      const durationHours = (endHour - startHour) + ((endMin - startMin) / 60);
+                      const height = durationHours * 48;
+
+                      return (
+                        <div
+                          className="absolute bg-purple-200/50 border-2 border-[hsl(258_46%_40%)] rounded-lg p-2 pointer-events-none z-20"
+                          style={{
+                            top: `${topOffset + 4}px`,
+                            left: '8px',
+                            right: '8px',
+                            height: `${height - 8}px`,
+                          }}
+                        >
+                          <div className="flex flex-col h-full justify-center">
+                            <span className="text-[9px] font-bold text-[hsl(258_46%_30%)] uppercase tracking-wide">
+                              Rescheduled
+                            </span>
+                            <p className="text-[10px] font-semibold text-[hsl(258_46%_25%)] mt-0.5">
+                              {formatTime(selectedSlot.time)} - {formatTime(selectedEndTime)}
+                            </p>
                           </div>
                         </div>
                       );
@@ -872,6 +993,21 @@ export default function RescheduleModal({
                   </div>
                 </div>
               </div>
+
+              {/* Validation Feedback */}
+              {selectedSlot && selectedEndTime && (
+                <div className="mt-3 px-4">
+                  <div
+                    className={`text-xs px-4 py-2 rounded-md ${
+                      currentValidation.isValid
+                        ? 'bg-green-50 text-green-700 border border-green-200'
+                        : 'bg-red-50 text-red-700 border border-red-200'
+                    }`}
+                  >
+                    {currentValidation.message}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -887,7 +1023,7 @@ export default function RescheduleModal({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={!selectedSlot || !selectedEndTime || isSubmitting}
+            disabled={!selectedSlot || !selectedEndTime || !currentValidation.isValid || isSubmitting}
             className="bg-[hsl(258_46%_25%)] text-white hover:bg-[hsl(258_46%_30%)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSubmitting ? 'Submitting...' : 'Submit Reschedule'}

@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AdminNewAppointmentModal } from "@/components/AdminNewAppointmentModal";
 import RescheduleModal from "@/components/RescheduleModal";
+import AcceptAppointmentModal from "@/components/AcceptAppointmentModal";
 import { StatusFlowGuide } from "@/components/StatusFlowGuide";
 import { createClient } from "@/lib/supabase/client";
 
@@ -412,8 +413,8 @@ export default function AdminAppointmentsPage() {
               last_name
             )
           )
-        `)
-        .eq('is_active', true);
+        `);
+        // Removed .eq('is_active', true) to show all appointments including inactive ones
 
       // Apply role-based filtering
       if (userData.role === 'dentist') {
@@ -933,8 +934,8 @@ export default function AdminAppointmentsPage() {
         {
           event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
           schema: 'public',
-          table: 'appointments',
-          filter: 'is_active=eq.true'
+          table: 'appointments'
+          // Removed filter to listen to all appointments including inactive ones
         },
         (payload) => {
           console.log('Real-time appointment change:', payload);
@@ -2133,7 +2134,7 @@ export default function AdminAppointmentsPage() {
                   {[6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].map((hour) => (
                     <div
                       key={hour}
-                      className="h-12 border-b border-gray-200 last:border-b-0 flex items-center justify-center"
+                      className="h-16 border-b border-gray-200 last:border-b-0 flex items-center justify-center"
                     >
                       <span className="text-xs font-semibold text-gray-600">
                         {hour <= 12 ? hour : hour - 12}:00 {hour < 12 ? 'AM' : 'PM'}
@@ -2170,9 +2171,9 @@ export default function AdminAppointmentsPage() {
                         const [startHour, startMin] = availability.startTime.split(':').map(Number);
                         const [endHour, endMin] = availability.endTime.split(':').map(Number);
                         
-                        const topOffset = ((startHour - 6) * 48) + ((startMin / 60) * 48);
+                        const topOffset = ((startHour - 6) * 64) + ((startMin / 60) * 64);
                         const durationHours = (endHour - startHour) + ((endMin - startMin) / 60);
-                        const height = durationHours * 48;
+                        const height = durationHours * 64;
                         
                         // Format time for labels (12-hour format)
                         const formatTime = (hour: number, min: number) => {
@@ -2210,7 +2211,7 @@ export default function AdminAppointmentsPage() {
                       {[6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].map((hour) => (
                         <div
                           key={hour}
-                          className="h-12 border-b border-gray-200 last:border-b-0"
+                          className="h-16 border-b border-gray-200 last:border-b-0"
                         />
                       ))}
 
@@ -2219,13 +2220,27 @@ export default function AdminAppointmentsPage() {
                         // Parse time (HH:mm format)
                         const [hours, minutes] = appointment.time.split(':').map(Number);
                         
-                        // Calculate position (6 AM = 0, each hour = 48px)
-                        const topOffset = ((hours - 6) * 48) + ((minutes / 60) * 48);
+                        // Calculate position (6 AM = 0, each hour = 64px)
+                        const topOffset = ((hours - 6) * 64) + ((minutes / 60) * 64);
                         
                         // Parse duration (e.g., "60 min")
                         const durationMatch = appointment.duration.match(/(\d+)/);
                         const durationMinutes = durationMatch ? parseInt(durationMatch[1]) : 60;
-                        const height = (durationMinutes / 60) * 48;
+                        const height = (durationMinutes / 60) * 64;
+                        
+                        // Calculate end time
+                        const endMinutes = minutes + durationMinutes;
+                        const endHours = hours + Math.floor(endMinutes / 60);
+                        const endMins = endMinutes % 60;
+                        
+                        // Format time to 12-hour format
+                        const formatTime12Hour = (h: number, m: number) => {
+                          const period = h >= 12 ? 'PM' : 'AM';
+                          const displayHour = h === 0 ? 12 : h > 12 ? h - 12 : h;
+                          return `${displayHour}:${String(m).padStart(2, '0')} ${period}`;
+                        };
+                        
+                        const timeRange = `${formatTime12Hour(hours, minutes)} - ${formatTime12Hour(endHours, endMins)}`;
                         
                         // Get status color
                         const statusColors = {
@@ -2257,7 +2272,7 @@ export default function AdminAppointmentsPage() {
                               {appointment.patientName}
                             </div>
                             <div className="text-[8px] truncate leading-tight mt-0.5">
-                              {appointment.time}
+                              {timeRange}
                             </div>
                             <div className="text-[8px] font-semibold truncate leading-tight mt-0.5 capitalize">
                               {appointment.status}
@@ -2296,6 +2311,38 @@ export default function AdminAppointmentsPage() {
 
               if (pendingAppointments.length === 0) return null;
 
+              // Sort appointments: requested, proposed | cancelled, rejected (each group sorted by updated_at desc)
+              const sortedAppointments = pendingAppointments.sort((a, b) => {
+                // Define status priority order
+                const statusOrder = {
+                  'requested': 1,
+                  'proposed': 2,
+                  'cancelled': 3,
+                  'rejected': 4
+                };
+                
+                const orderA = statusOrder[a.status as keyof typeof statusOrder] || 5;
+                const orderB = statusOrder[b.status as keyof typeof statusOrder] || 5;
+                
+                // First sort by status priority
+                if (orderA !== orderB) {
+                  return orderA - orderB;
+                }
+                
+                // Within same status, sort by updated_at (newest first)
+                const dateA = new Date(a.requestedAt || 0).getTime();
+                const dateB = new Date(b.requestedAt || 0).getTime();
+                return dateB - dateA;
+              });
+
+              // Separate into two groups for visual separation
+              const activeGroup = sortedAppointments.filter(apt => 
+                ['proposed', 'requested'].includes(apt.status)
+              );
+              const inactiveGroup = sortedAppointments.filter(apt => 
+                ['cancelled', 'rejected'].includes(apt.status)
+              );
+
               return (
                 <div className="mt-6 border border-gray-200 rounded-lg bg-gray-50 p-4 shadow-sm">
                   <div className="flex items-center gap-2 mb-3">
@@ -2311,67 +2358,132 @@ export default function AdminAppointmentsPage() {
                   </div>
                   <p className="text-xs text-gray-600 mb-3">These appointments do not occupy time slots on the calendar</p>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                    {pendingAppointments.map((appointment) => {
-                      const statusColors = {
-                        requested: 'bg-blue-50 border-blue-200 text-blue-900',
-                        proposed: 'bg-amber-50 border-amber-200 text-amber-900',
-                        rejected: 'bg-orange-50 border-orange-200 text-orange-900',
-                        cancelled: 'bg-red-50 border-red-200 text-red-900',
-                      };
-                      
-                      const statusBadgeColors = {
-                        requested: 'bg-blue-100 text-blue-800',
-                        proposed: 'bg-amber-100 text-amber-800',
-                        rejected: 'bg-orange-100 text-orange-800',
-                        cancelled: 'bg-red-100 text-red-800',
-                      };
-                      
-                      const colorClass = statusColors[appointment.status as keyof typeof statusColors] || 'bg-gray-50 border-gray-200 text-gray-900';
-                      const badgeClass = statusBadgeColors[appointment.status as keyof typeof statusBadgeColors] || 'bg-gray-100 text-gray-800';
-                      
-                      return (
-                        <div
-                          key={appointment.id}
-                          onClick={() => handleAppointmentClick(appointment)}
-                          className={`${colorClass} border-2 rounded-lg p-2.5 cursor-pointer hover:shadow-md transition-all duration-200`}
-                        >
-                          <div className="flex items-start justify-between gap-2 mb-1.5">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-bold truncate">{appointment.patientName}</p>
-                              <p className="text-[10px] text-gray-600 truncate mt-0.5">{appointment.patientPhone}</p>
+                  {/* Active Group: Proposed, Requested */}
+                  {activeGroup.length > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 mb-4">
+                      {activeGroup.map((appointment) => {
+                        const statusColors = {
+                          requested: 'bg-blue-50 border-blue-200 text-blue-900',
+                          proposed: 'bg-amber-50 border-amber-200 text-amber-900',
+                        };
+                        
+                        const statusBadgeColors = {
+                          requested: 'bg-blue-100 text-blue-800',
+                          proposed: 'bg-amber-100 text-amber-800',
+                        };
+                        
+                        const colorClass = statusColors[appointment.status as keyof typeof statusColors] || 'bg-gray-50 border-gray-200 text-gray-900';
+                        const badgeClass = statusBadgeColors[appointment.status as keyof typeof statusBadgeColors] || 'bg-gray-100 text-gray-800';
+                        
+                        return (
+                          <div
+                            key={appointment.id}
+                            onClick={() => handleAppointmentClick(appointment)}
+                            className={`${colorClass} border-2 rounded-lg p-2.5 cursor-pointer hover:shadow-md transition-all duration-200`}
+                          >
+                            <div className="flex items-start justify-between gap-2 mb-1.5">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold truncate">{appointment.patientName}</p>
+                                <p className="text-[10px] text-gray-600 truncate mt-0.5">{appointment.patientPhone}</p>
+                              </div>
+                              <span className={`${badgeClass} text-[9px] font-bold uppercase px-1.5 py-0.5 rounded tracking-wide flex-shrink-0`}>
+                                {appointment.status}
+                              </span>
                             </div>
-                            <span className={`${badgeClass} text-[9px] font-bold uppercase px-1.5 py-0.5 rounded tracking-wide flex-shrink-0`}>
-                              {appointment.status}
-                            </span>
+                            <div className="flex items-center gap-1.5 text-[10px] text-gray-700 mt-1.5">
+                              <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              <span className="font-medium">
+                                {(() => {
+                                  const aptDate = new Date(appointment.date + 'T' + appointment.time);
+                                  return aptDate.toLocaleDateString('en-US', { 
+                                    weekday: 'long', 
+                                    month: 'long', 
+                                    day: 'numeric', 
+                                    year: 'numeric' 
+                                  }) + ' at ' + aptDate.toLocaleTimeString('en-US', { 
+                                    hour: 'numeric', 
+                                    minute: '2-digit', 
+                                    hour12: true 
+                                  });
+                                })()}
+                              </span>
+                            </div>
+                            {appointment.concern && (
+                              <p className="text-[10px] text-gray-600 mt-1.5 line-clamp-1 italic">"{appointment.concern}"</p>
+                            )}
                           </div>
-                          <div className="flex items-center gap-1.5 text-[10px] text-gray-700 mt-1.5">
-                            <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            <span className="font-medium">
-                              {(() => {
-                                const aptDate = new Date(appointment.date + 'T' + appointment.time);
-                                return aptDate.toLocaleDateString('en-US', { 
-                                  weekday: 'long', 
-                                  month: 'long', 
-                                  day: 'numeric', 
-                                  year: 'numeric' 
-                                }) + ' at ' + aptDate.toLocaleTimeString('en-US', { 
-                                  hour: 'numeric', 
-                                  minute: '2-digit', 
-                                  hour12: true 
-                                });
-                              })()}
-                            </span>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Separator Bar */}
+                  {activeGroup.length > 0 && inactiveGroup.length > 0 && (
+                    <div className="my-4 border-t-2 border-gray-300"></div>
+                  )}
+
+                  {/* Inactive Group: Cancelled, Rejected */}
+                  {inactiveGroup.length > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {inactiveGroup.map((appointment) => {
+                        const statusColors = {
+                          rejected: 'bg-orange-50 border-orange-200 text-orange-900',
+                          cancelled: 'bg-red-50 border-red-200 text-red-900',
+                        };
+                        
+                        const statusBadgeColors = {
+                          rejected: 'bg-orange-100 text-orange-800',
+                          cancelled: 'bg-red-100 text-red-800',
+                        };
+                        
+                        const colorClass = statusColors[appointment.status as keyof typeof statusColors] || 'bg-gray-50 border-gray-200 text-gray-900';
+                        const badgeClass = statusBadgeColors[appointment.status as keyof typeof statusBadgeColors] || 'bg-gray-100 text-gray-800';
+                        
+                        return (
+                          <div
+                            key={appointment.id}
+                            onClick={() => handleAppointmentClick(appointment)}
+                            className={`${colorClass} border-2 rounded-lg p-2.5 cursor-pointer hover:shadow-md transition-all duration-200`}
+                          >
+                            <div className="flex items-start justify-between gap-2 mb-1.5">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold truncate">{appointment.patientName}</p>
+                                <p className="text-[10px] text-gray-600 truncate mt-0.5">{appointment.patientPhone}</p>
+                              </div>
+                              <span className={`${badgeClass} text-[9px] font-bold uppercase px-1.5 py-0.5 rounded tracking-wide flex-shrink-0`}>
+                                {appointment.status}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[10px] text-gray-700 mt-1.5">
+                              <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              <span className="font-medium">
+                                {(() => {
+                                  const aptDate = new Date(appointment.date + 'T' + appointment.time);
+                                  return aptDate.toLocaleDateString('en-US', { 
+                                    weekday: 'long', 
+                                    month: 'long', 
+                                    day: 'numeric', 
+                                    year: 'numeric' 
+                                  }) + ' at ' + aptDate.toLocaleTimeString('en-US', { 
+                                    hour: 'numeric', 
+                                    minute: '2-digit', 
+                                    hour12: true 
+                                  });
+                                })()}
+                              </span>
+                            </div>
+                            {appointment.concern && (
+                              <p className="text-[10px] text-gray-600 mt-1.5 line-clamp-1 italic">"{appointment.concern}"</p>
+                            )}
                           </div>
-                          {appointment.concern && (
-                            <p className="text-[10px] text-gray-600 mt-1.5 line-clamp-1 italic">"{appointment.concern}"</p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -3057,158 +3169,23 @@ export default function AdminAppointmentsPage() {
         isSubmitting={isProposing}
       />
 
-      {/* Accept Appointment Modal - Set End Time */}
-      <Dialog open={isAcceptModalOpen} onOpenChange={setIsAcceptModalOpen}>
-        <DialogContent className="sm:max-w-[500px] bg-white">
-          <DialogHeader>
-            <DialogTitle className="text-[hsl(258_46%_25%)] flex items-center">
-              <Check className="mr-2 h-5 w-5" />
-              Accept Appointment
-            </DialogTitle>
-            <p className="text-sm text-[hsl(258_22%_50%)] mt-2">
-              Confirm the appointment time and set the end time
-            </p>
-          </DialogHeader>
-          
-          {acceptAppointment && (
-            <div className="space-y-4 py-4">
-              {/* Appointment Summary */}
-              <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-lg border border-blue-200">
-                <h4 className="text-sm font-semibold text-[hsl(258_46%_25%)] mb-3">Appointment Details</h4>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-600">Patient:</span>
-                    <span className="text-sm font-bold text-[hsl(258_46%_25%)]">{acceptAppointment.patientName}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-600">Date:</span>
-                    <span className="text-sm font-bold text-[hsl(258_46%_25%)]">{formatDateShort(acceptAppointment.date)}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-600">Start Time:</span>
-                    <span className="text-sm font-bold text-[hsl(258_46%_25%)]">{formatTime12h(acceptAppointment.time)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* End Time Picker */}
-              <div>
-                <label className="block text-sm font-medium text-[hsl(258_46%_25%)] mb-2">
-                  Select End Time *
-                </label>
-                <div className="flex items-center gap-1.5 justify-center">
-                  <div className="relative">
-                    <select
-                      className="appearance-none px-2 py-1 pr-6 text-xs font-bold border border-[hsl(258_46%_25%)] rounded bg-white text-[hsl(258_46%_25%)] focus:outline-none focus:ring-1 focus:ring-[hsl(258_46%_25%)] cursor-pointer"
-                      onChange={(e) => {
-                        const hour12 = parseInt(e.target.value);
-                        const currentTime = acceptEndTime ? acceptEndTime.split(':') : ['10', '00'];
-                        const currentHour24 = acceptEndTime ? parseInt(currentTime[0]) : 10;
-                        const isPM = currentHour24 >= 12;
-                        
-                        let newHour24 = hour12;
-                        if (isPM) {
-                          newHour24 = hour12 === 12 ? 12 : hour12 + 12;
-                        } else {
-                          newHour24 = hour12 === 12 ? 0 : hour12;
-                        }
-                        
-                        const hourStr = String(newHour24).padStart(2, '0');
-                        setAcceptEndTime(`${hourStr}:${currentTime[1]}`);
-                      }}
-                      value={acceptEndTime ? (() => {
-                        const hour24 = parseInt(acceptEndTime.split(':')[0]);
-                        if (hour24 === 0) return '12';
-                        if (hour24 > 12) return String(hour24 - 12);
-                        return String(hour24);
-                      })() : '10'}
-                    >
-                      {[...Array(12)].map((_, i) => {
-                        const hour = i + 1;
-                        return (
-                          <option key={hour} value={String(hour)}>
-                            {String(hour).padStart(2, '0')}
-                          </option>
-                        );
-                      })}
-                    </select>
-                    <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none">
-                      <svg className="w-3 h-3 text-[hsl(258_46%_25%)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </div>
-                  </div>
-
-                  <span className="text-sm font-bold text-[hsl(258_46%_25%)]">:</span>
-
-                  <div className="relative">
-                    <select
-                      className="appearance-none px-2 py-1 pr-6 text-xs font-bold border border-[hsl(258_46%_25%)] rounded bg-white text-[hsl(258_46%_25%)] focus:outline-none focus:ring-1 focus:ring-[hsl(258_46%_25%)] cursor-pointer"
-                      onChange={(e) => {
-                        const minute = e.target.value;
-                        const currentTime = acceptEndTime ? acceptEndTime.split(':') : ['10', '00'];
-                        const currentHour = currentTime[0];
-                        setAcceptEndTime(`${currentHour}:${minute}`);
-                      }}
-                      value={acceptEndTime ? acceptEndTime.split(':')[1] : '00'}
-                    >
-                      <option value="00">00</option>
-                      <option value="30">30</option>
-                    </select>
-                    <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none">
-                      <svg className="w-3 h-3 text-[hsl(258_46%_25%)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      const currentTime = acceptEndTime ? acceptEndTime.split(':') : ['10', '00'];
-                      const currentHour24 = parseInt(currentTime[0]);
-                      let newHour24;
-                      
-                      if (currentHour24 >= 12) {
-                        newHour24 = currentHour24 === 12 ? 0 : currentHour24 - 12;
-                      } else {
-                        newHour24 = currentHour24 === 0 ? 12 : currentHour24 + 12;
-                      }
-                      
-                      const hourStr = String(newHour24).padStart(2, '0');
-                      setAcceptEndTime(`${hourStr}:${currentTime[1]}`);
-                    }}
-                    className="px-3 py-1 bg-[hsl(258_46%_25%)] text-white text-xs font-bold rounded hover:bg-[hsl(258_46%_30%)] transition-colors min-w-[48px]"
-                  >
-                    {acceptEndTime && parseInt(acceptEndTime.split(':')[0]) >= 12 ? 'PM' : 'AM'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex justify-end gap-2 pt-2">
-                <Button 
-                  variant="outline" 
-                  onClick={() => {
-                    setIsAcceptModalOpen(false);
-                    setAcceptAppointment(null);
-                    setAcceptEndTime("");
-                  }}
-                  className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors"
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  onClick={handleAcceptAppointmentClick}
-                  style={{ backgroundColor: 'hsl(258, 46%, 25%)', color: 'white' }}
-                  className="cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity"
-                >
-                  Continue
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Accept Appointment Modal - New Design */}
+      <AcceptAppointmentModal
+        open={isAcceptModalOpen}
+        onOpenChange={setIsAcceptModalOpen}
+        appointment={acceptAppointment ? {
+          id: acceptAppointment.id,
+          patientName: acceptAppointment.patientName,
+          date: acceptAppointment.date,
+          time: acceptAppointment.time,
+          doctorId: acceptAppointment.doctorId
+        } : null}
+        onConfirm={(endTime) => {
+          setAcceptEndTime(endTime);
+          setIsAcceptModalOpen(false);
+          setIsAcceptConfirmOpen(true);
+        }}
+      />
 
       {/* Accept Appointment Confirmation Dialog */}
       <Dialog open={isAcceptConfirmOpen} onOpenChange={setIsAcceptConfirmOpen}>
@@ -3332,63 +3309,223 @@ export default function AdminAppointmentsPage() {
                   );
                 }
 
-                // Sort appointments by time
+                // Custom sorting: requested, proposed first, then cancelled, rejected
                 const sortedAppointments = [...dayAppointments].sort((a, b) => {
+                  // Define status priority order
+                  const statusOrder: Record<string, number> = {
+                    'requested': 1,
+                    'proposed': 2,
+                    'booked': 3,
+                    'arrived': 4,
+                    'ongoing': 5,
+                    'completed': 6,
+                    'cancelled': 7,
+                    'rejected': 8
+                  };
+                  
+                  const orderA = statusOrder[a.status] || 99;
+                  const orderB = statusOrder[b.status] || 99;
+                  
+                  // Primary sort by status priority
+                  if (orderA !== orderB) {
+                    return orderA - orderB;
+                  }
+                  
+                  // Secondary sort by time (for same status)
                   return a.time.localeCompare(b.time);
                 });
 
-                return sortedAppointments.map((appointment) => (
-                  <Card
-                    key={appointment.id}
-                    className="border border-gray-200 hover:border-purple-300 hover:shadow-md transition-all duration-200 cursor-pointer"
-                    onClick={() => {
-                      // Don't close day modal - allow nested modal behavior
-                      handleAppointmentClick(appointment);
-                    }}
-                  >
-                    <CardContent className="p-3 sm:p-4">
-                      <div className="flex items-start justify-between gap-2 sm:gap-4">
-                        {/* Left: Patient info */}
-                        <div className="flex items-start space-x-2 sm:space-x-3 flex-1 min-w-0">
-                          <Avatar className="h-8 w-8 sm:h-10 sm:w-10 mt-1 flex-shrink-0">
-                            <AvatarFallback style={{ backgroundColor: 'hsl(258, 22%, 65%)', color: 'hsl(258, 46%, 25%)' }}>
-                              {getInitials(appointment.patientName)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <h4 className="font-semibold text-sm sm:text-base text-[hsl(258_46%_25%)] truncate">
-                              {appointment.patientName}
-                            </h4>
-                            <p className="text-xs sm:text-sm text-[hsl(258_22%_50%)] truncate">
-                              {appointment.service}
-                            </p>
-                            <div className="flex items-center gap-1 sm:gap-2 mt-1 flex-wrap">
-                              <div className="flex items-center text-[10px] sm:text-xs text-[hsl(258_22%_50%)]">
-                                <Stethoscope className="h-3 w-3 mr-0.5 sm:mr-1 flex-shrink-0" />
-                                <span className="truncate">{appointment.doctorName}</span>
-                              </div>
-                              <span className="text-gray-300 hidden sm:inline">•</span>
-                              <div className="flex items-center text-[10px] sm:text-xs text-[hsl(258_22%_50%)]">
-                                <Clock className="h-3 w-3 mr-0.5 sm:mr-1 flex-shrink-0" />
-                                {appointment.duration}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
+                // Split into groups: active (proposed, requested) and inactive (cancelled, rejected)
+                const activeGroup = sortedAppointments.filter(apt => 
+                  ['proposed', 'requested'].includes(apt.status)
+                );
+                const confirmedGroup = sortedAppointments.filter(apt => 
+                  ['booked', 'arrived', 'ongoing', 'completed'].includes(apt.status)
+                );
+                const inactiveGroup = sortedAppointments.filter(apt => 
+                  ['cancelled', 'rejected'].includes(apt.status)
+                );
 
-                        {/* Right: Time and status */}
-                        <div className="flex flex-col items-end gap-1 sm:gap-2 flex-shrink-0">
-                          <div className="text-base sm:text-lg font-bold text-[hsl(258_46%_25%)]">
-                            {formatTime12h(appointment.time)}
-                          </div>
-                          <Badge className={`status-badge text-[10px] sm:text-xs ${getStatusColor(appointment.status)}`}>
-                            {getStatusDisplayLabel(appointment.status)}
-                          </Badge>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ));
+                return (
+                  <>
+                    {/* Active Group - Proposed & Requested */}
+                    {activeGroup.length > 0 && (
+                      <>
+                        {activeGroup.map((appointment) => (
+                          <Card
+                            key={appointment.id}
+                            className="border border-gray-200 hover:border-purple-300 hover:shadow-md transition-all duration-200 cursor-pointer"
+                            onClick={() => {
+                              // Don't close day modal - allow nested modal behavior
+                              handleAppointmentClick(appointment);
+                            }}
+                          >
+                            <CardContent className="p-3 sm:p-4">
+                              <div className="flex items-start justify-between gap-2 sm:gap-4">
+                                {/* Left: Patient info */}
+                                <div className="flex items-start space-x-2 sm:space-x-3 flex-1 min-w-0">
+                                  <Avatar className="h-8 w-8 sm:h-10 sm:w-10 mt-1 flex-shrink-0">
+                                    <AvatarFallback style={{ backgroundColor: 'hsl(258, 22%, 65%)', color: 'hsl(258, 46%, 25%)' }}>
+                                      {getInitials(appointment.patientName)}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div className="flex-1 min-w-0">
+                                    <h4 className="font-semibold text-sm sm:text-base text-[hsl(258_46%_25%)] truncate">
+                                      {appointment.patientName}
+                                    </h4>
+                                    <p className="text-xs sm:text-sm text-[hsl(258_22%_50%)] truncate">
+                                      {appointment.service}
+                                    </p>
+                                    <div className="flex items-center gap-1 sm:gap-2 mt-1 flex-wrap">
+                                      <div className="flex items-center text-[10px] sm:text-xs text-[hsl(258_22%_50%)]">
+                                        <Stethoscope className="h-3 w-3 mr-0.5 sm:mr-1 flex-shrink-0" />
+                                        <span className="truncate">{appointment.doctorName}</span>
+                                      </div>
+                                      <span className="text-gray-300 hidden sm:inline">•</span>
+                                      <div className="flex items-center text-[10px] sm:text-xs text-[hsl(258_22%_50%)]">
+                                        <Clock className="h-3 w-3 mr-0.5 sm:mr-1 flex-shrink-0" />
+                                        {appointment.duration}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Right: Time and status */}
+                                <div className="flex flex-col items-end gap-1 sm:gap-2 flex-shrink-0">
+                                  <div className="text-base sm:text-lg font-bold text-[hsl(258_46%_25%)]">
+                                    {formatTime12h(appointment.time)}
+                                  </div>
+                                  <Badge className={`status-badge text-[10px] sm:text-xs ${getStatusColor(appointment.status)}`}>
+                                    {getStatusDisplayLabel(appointment.status)}
+                                  </Badge>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </>
+                    )}
+
+                    {/* Confirmed Group - Booked, Arrived, Ongoing, Completed */}
+                    {confirmedGroup.length > 0 && (
+                      <>
+                        {confirmedGroup.map((appointment) => (
+                          <Card
+                            key={appointment.id}
+                            className="border border-gray-200 hover:border-purple-300 hover:shadow-md transition-all duration-200 cursor-pointer"
+                            onClick={() => {
+                              handleAppointmentClick(appointment);
+                            }}
+                          >
+                            <CardContent className="p-3 sm:p-4">
+                              <div className="flex items-start justify-between gap-2 sm:gap-4">
+                                {/* Left: Patient info */}
+                                <div className="flex items-start space-x-2 sm:space-x-3 flex-1 min-w-0">
+                                  <Avatar className="h-8 w-8 sm:h-10 sm:w-10 mt-1 flex-shrink-0">
+                                    <AvatarFallback style={{ backgroundColor: 'hsl(258, 22%, 65%)', color: 'hsl(258, 46%, 25%)' }}>
+                                      {getInitials(appointment.patientName)}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div className="flex-1 min-w-0">
+                                    <h4 className="font-semibold text-sm sm:text-base text-[hsl(258_46%_25%)] truncate">
+                                      {appointment.patientName}
+                                    </h4>
+                                    <p className="text-xs sm:text-sm text-[hsl(258_22%_50%)] truncate">
+                                      {appointment.service}
+                                    </p>
+                                    <div className="flex items-center gap-1 sm:gap-2 mt-1 flex-wrap">
+                                      <div className="flex items-center text-[10px] sm:text-xs text-[hsl(258_22%_50%)]">
+                                        <Stethoscope className="h-3 w-3 mr-0.5 sm:mr-1 flex-shrink-0" />
+                                        <span className="truncate">{appointment.doctorName}</span>
+                                      </div>
+                                      <span className="text-gray-300 hidden sm:inline">•</span>
+                                      <div className="flex items-center text-[10px] sm:text-xs text-[hsl(258_22%_50%)]">
+                                        <Clock className="h-3 w-3 mr-0.5 sm:mr-1 flex-shrink-0" />
+                                        {appointment.duration}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Right: Time and status */}
+                                <div className="flex flex-col items-end gap-1 sm:gap-2 flex-shrink-0">
+                                  <div className="text-base sm:text-lg font-bold text-[hsl(258_46%_25%)]">
+                                    {formatTime12h(appointment.time)}
+                                  </div>
+                                  <Badge className={`status-badge text-[10px] sm:text-xs ${getStatusColor(appointment.status)}`}>
+                                    {getStatusDisplayLabel(appointment.status)}
+                                  </Badge>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </>
+                    )}
+
+                    {/* Separator between active/confirmed and inactive */}
+                    {(activeGroup.length > 0 || confirmedGroup.length > 0) && inactiveGroup.length > 0 && (
+                      <div className="my-4 border-t-2 border-gray-300"></div>
+                    )}
+
+                    {/* Inactive Group - Cancelled & Rejected */}
+                    {inactiveGroup.length > 0 && (
+                      <>
+                        {inactiveGroup.map((appointment) => (
+                          <Card
+                            key={appointment.id}
+                            className="border border-gray-200 hover:border-purple-300 hover:shadow-md transition-all duration-200 cursor-pointer"
+                            onClick={() => {
+                              handleAppointmentClick(appointment);
+                            }}
+                          >
+                            <CardContent className="p-3 sm:p-4">
+                              <div className="flex items-start justify-between gap-2 sm:gap-4">
+                                {/* Left: Patient info */}
+                                <div className="flex items-start space-x-2 sm:space-x-3 flex-1 min-w-0">
+                                  <Avatar className="h-8 w-8 sm:h-10 sm:w-10 mt-1 flex-shrink-0">
+                                    <AvatarFallback style={{ backgroundColor: 'hsl(258, 22%, 65%)', color: 'hsl(258, 46%, 25%)' }}>
+                                      {getInitials(appointment.patientName)}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div className="flex-1 min-w-0">
+                                    <h4 className="font-semibold text-sm sm:text-base text-[hsl(258_46%_25%)] truncate">
+                                      {appointment.patientName}
+                                    </h4>
+                                    <p className="text-xs sm:text-sm text-[hsl(258_22%_50%)] truncate">
+                                      {appointment.service}
+                                    </p>
+                                    <div className="flex items-center gap-1 sm:gap-2 mt-1 flex-wrap">
+                                      <div className="flex items-center text-[10px] sm:text-xs text-[hsl(258_22%_50%)]">
+                                        <Stethoscope className="h-3 w-3 mr-0.5 sm:mr-1 flex-shrink-0" />
+                                        <span className="truncate">{appointment.doctorName}</span>
+                                      </div>
+                                      <span className="text-gray-300 hidden sm:inline">•</span>
+                                      <div className="flex items-center text-[10px] sm:text-xs text-[hsl(258_22%_50%)]">
+                                        <Clock className="h-3 w-3 mr-0.5 sm:mr-1 flex-shrink-0" />
+                                        {appointment.duration}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Right: Time and status */}
+                                <div className="flex flex-col items-end gap-1 sm:gap-2 flex-shrink-0">
+                                  <div className="text-base sm:text-lg font-bold text-[hsl(258_46%_25%)]">
+                                    {formatTime12h(appointment.time)}
+                                  </div>
+                                  <Badge className={`status-badge text-[10px] sm:text-xs ${getStatusColor(appointment.status)}`}>
+                                    {getStatusDisplayLabel(appointment.status)}
+                                  </Badge>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </>
+                    )}
+                  </>
+                );
               })()}
             </div>
 
@@ -3520,9 +3657,9 @@ export default function AdminAppointmentsPage() {
                         const [startHour, startMin] = availability.startTime.split(':').map(Number);
                         const [endHour, endMin] = availability.endTime.split(':').map(Number);
                         
-                        const topOffset = ((startHour - 6) * 48) + ((startMin / 60) * 48);
+                        const topOffset = ((startHour - 6) * 64) + ((startMin / 60) * 64);
                         const durationHours = (endHour - startHour) + ((endMin - startMin) / 60);
-                        const height = durationHours * 48;
+                        const height = durationHours * 64;
                         
                         // Format time for labels (12-hour format)
                         const formatTime = (hour: number, min: number) => {
@@ -3567,10 +3704,10 @@ export default function AdminAppointmentsPage() {
                       {/* Render appointments */}
                       {dayAppointments.map((appointment) => {
                         const [hours, minutes] = appointment.time.split(':').map(Number);
-                        const topOffset = ((hours - 6) * 48) + ((minutes / 60) * 48);
+                        const topOffset = ((hours - 6) * 64) + ((minutes / 60) * 64);
                         const durationMatch = appointment.duration.match(/(\d+)/);
                         const durationMinutes = durationMatch ? parseInt(durationMatch[1]) : 60;
-                        const height = (durationMinutes / 60) * 48;
+                        const height = (durationMinutes / 60) * 64;
                         
                         const statusColors = {
                           requested: 'bg-blue-100 border-blue-300 text-blue-800',
