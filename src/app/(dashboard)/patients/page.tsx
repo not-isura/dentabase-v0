@@ -164,6 +164,67 @@ function formatTimeRange(start?: string | null, end?: string | null) {
   return `${startLabel} - ${endLabel}`;
 }
 
+function transformAppointmentRecord(apt: any): PatientAppointmentDetail {
+  const calculateDuration = (start?: string | null, end?: string | null) => {
+    if (!start || !end) return "60 min";
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    const diffMs = endDate.getTime() - startDate.getTime();
+    if (diffMs <= 0) return "60 min";
+    const diffMinutes = Math.round(diffMs / 60000);
+    return `${diffMinutes} min`;
+  };
+
+  const bestStart = apt.booked_start_time || apt.proposed_start_time || apt.requested_start_time || apt.created_at;
+  const displayDate = new Date(bestStart || new Date().toISOString());
+  const year = displayDate.getFullYear();
+  const month = String(displayDate.getMonth() + 1).padStart(2, "0");
+  const day = String(displayDate.getDate()).padStart(2, "0");
+  const hours = String(displayDate.getHours()).padStart(2, "0");
+  const minutes = String(displayDate.getMinutes()).padStart(2, "0");
+
+  const patientRecord = apt.patient;
+  const patientUserRaw = patientRecord?.users;
+  const patientUser = Array.isArray(patientUserRaw) ? patientUserRaw[0] : patientUserRaw;
+
+  const nameParts = [patientUser?.first_name, patientUser?.middle_name, patientUser?.last_name]
+    .filter(Boolean)
+    .map((part: string) => part.trim());
+  const fullName = nameParts.join(" ") || "Unnamed Patient";
+
+  const doctorUserRaw = apt.doctors?.users;
+  const doctorUser = Array.isArray(doctorUserRaw) ? doctorUserRaw[0] : doctorUserRaw;
+  const doctorName = doctorUser
+    ? `Dr. ${doctorUser.last_name || doctorUser.first_name || "Unknown"}`
+    : "Dr. Unknown";
+
+  return {
+    id: apt.appointment_id,
+    patientName: fullName,
+    patientEmail: patientUser?.email || "N/A",
+    patientPhone: patientUser?.phone_number || "N/A",
+    emergencyContactName: patientRecord?.emergency_contact_name || "N/A",
+    emergencyContactNumber: patientRecord?.emergency_contact_no || "N/A",
+    concern: apt.concern || "N/A",
+    status: apt.status,
+    date: `${year}-${month}-${day}`,
+    time: `${hours}:${minutes}`,
+    duration: calculateDuration(
+      apt.booked_start_time || apt.proposed_start_time || apt.requested_start_time,
+      apt.booked_end_time || apt.proposed_end_time || null
+    ),
+    doctorId: apt.doctor_id,
+    doctorName,
+    doctorNote: apt.doctor_note,
+    requestedAt: apt.created_at,
+    proposedStartTime: apt.proposed_start_time,
+    proposedEndTime: apt.proposed_end_time,
+    bookedStartTime: apt.booked_start_time,
+    bookedEndTime: apt.booked_end_time,
+    statusHistory: []
+  } satisfies PatientAppointmentDetail;
+}
+
 export default function PatientsPage() {
   const [activeTab, setActiveTab] = useState<RosterTab>("roster");
   const [isLoadingRoster, setIsLoadingRoster] = useState<boolean>(false);
@@ -191,6 +252,11 @@ export default function PatientsPage() {
   const [isLoadingPatientProfile, setIsLoadingPatientProfile] = useState<boolean>(false);
   const [patientProfileError, setPatientProfileError] = useState<string | null>(null);
   const [loadingProfilePatientId, setLoadingProfilePatientId] = useState<string | null>(null);
+  const [clinicHistoryAppointments, setClinicHistoryAppointments] = useState<PatientAppointmentDetail[]>([]);
+  const [isLoadingHistoryList, setIsLoadingHistoryList] = useState<boolean>(false);
+  const [historyListError, setHistoryListError] = useState<string | null>(null);
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<"all" | "completed" | "cancelled" | "rejected">("all");
+  const [historySearchTerm, setHistorySearchTerm] = useState<string>("");
 
   const resetPatientContext = () => {
     setSelectedPatient(null);
@@ -251,6 +317,91 @@ export default function PatientsPage() {
     const timeout = window.setTimeout(() => setDoctorNoteSuccess(null), 3000);
     return () => window.clearTimeout(timeout);
   }, [doctorNoteSuccess]);
+
+  const loadClinicHistory = async () => {
+    try {
+      setIsLoadingHistoryList(true);
+      setHistoryListError(null);
+
+      const supabase = createClient();
+
+      const baseSelect = `
+          appointment_id,
+          doctor_id,
+          concern,
+          status,
+          doctor_note,
+          requested_start_time,
+          proposed_start_time,
+          proposed_end_time,
+          booked_start_time,
+          booked_end_time,
+          created_at,
+          patient:patient_id (
+            patient_id,
+            emergency_contact_name,
+            emergency_contact_no,
+            users (
+              first_name,
+              middle_name,
+              last_name,
+              email,
+              phone_number
+            )
+          ),
+          doctors (
+            doctor_id,
+            users (
+              first_name,
+              middle_name,
+              last_name
+            )
+          )
+        `;
+
+      const historyStatuses = ["completed", "cancelled", "rejected", "booked", "arrived", "ongoing"] as const;
+      const nowIso = new Date().toISOString();
+
+      let historyQuery = supabase
+        .from("appointments")
+        .select(baseSelect)
+        .in("status", historyStatuses)
+        .order("requested_start_time", { ascending: false })
+        .limit(100);
+
+      historyQuery = historyQuery.or(
+        `and(booked_start_time.not.is.null,booked_start_time.lt.${nowIso}),and(booked_start_time.is.null,proposed_start_time.not.is.null,proposed_start_time.lt.${nowIso}),and(booked_start_time.is.null,proposed_start_time.is.null,requested_start_time.lt.${nowIso})`
+      );
+
+      if (currentDoctorId) {
+        historyQuery = historyQuery.eq("doctor_id", currentDoctorId);
+      }
+
+      const { data, error } = await historyQuery;
+
+      if (error) {
+        console.error("Failed to load clinic history:", error);
+        setHistoryListError("Failed to load appointment history.");
+        setClinicHistoryAppointments([]);
+        return;
+      }
+
+      const transformed = (data || []).map((apt: any) => transformAppointmentRecord(apt));
+      setClinicHistoryAppointments(transformed);
+    } catch (error) {
+      console.error("Unexpected error loading clinic history:", error);
+      setHistoryListError("An unexpected error occurred while loading appointment history.");
+      setClinicHistoryAppointments([]);
+    } finally {
+      setIsLoadingHistoryList(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "history") {
+      void loadClinicHistory();
+    }
+  }, [activeTab, currentDoctorId]);
 
   const loadRoster = async () => {
     try {
@@ -424,55 +575,55 @@ export default function PatientsPage() {
     }
   };
 
-    const loadPatientProfile = async (patient: PatientSummary): Promise<PatientProfileDetail> => {
-      const supabase = createClient();
+  const loadPatientProfile = async (patient: PatientSummary): Promise<PatientProfileDetail> => {
+    const supabase = createClient();
 
-      const { data, error } = await supabase
-        .from("patient")
-        .select(
-          `
-            patient_id,
-            address,
-            emergency_contact_no,
-            emergency_contact_name,
-            created_at,
-            updated_at,
-            users:user_id (
-              first_name,
-              middle_name,
-              last_name,
-              email,
-              phone_number
-            )
-          `
-        )
-        .eq("patient_id", patient.patientId)
-        .single();
+    const { data, error } = await supabase
+      .from("patient")
+      .select(
+        `
+          patient_id,
+          address,
+          emergency_contact_no,
+          emergency_contact_name,
+          created_at,
+          updated_at,
+          users:user_id (
+            first_name,
+            middle_name,
+            last_name,
+            email,
+            phone_number
+          )
+        `
+      )
+      .eq("patient_id", patient.patientId)
+      .single();
 
-      if (error || !data) {
-        throw error || new Error("Patient record not found");
-      }
+    if (error || !data) {
+      throw error || new Error("Patient record not found");
+    }
 
-      const userRecordRaw = data.users;
-      const userRecord = Array.isArray(userRecordRaw) ? userRecordRaw[0] : userRecordRaw;
+    const userRecordRaw = data.users;
+    const userRecord = Array.isArray(userRecordRaw) ? userRecordRaw[0] : userRecordRaw;
 
-      const nameParts = [userRecord?.first_name, userRecord?.middle_name, userRecord?.last_name]
-        .filter(Boolean)
-        .map((part: string) => part.trim());
-      const fullName = nameParts.length ? nameParts.join(" ") : patient.patientName;
+    const nameParts = [userRecord?.first_name, userRecord?.middle_name, userRecord?.last_name]
+      .filter(Boolean)
+      .map((part: string) => part.trim());
+    const fullName = nameParts.length ? nameParts.join(" ") : patient.patientName;
 
-      return {
-        patientId: data.patient_id,
-        fullName,
-        email: userRecord?.email || patient.email,
-        phone: userRecord?.phone_number || patient.phone,
-        address: data.address,
-        emergencyContactName: data.emergency_contact_name,
-        emergencyContactNumber: data.emergency_contact_no,
-        createdAt: data.created_at,
-        updatedAt: data.updated_at ?? null
-      } satisfies PatientProfileDetail;
-    };
+    return {
+      patientId: data.patient_id,
+      fullName,
+      email: userRecord?.email || patient.email,
+      phone: userRecord?.phone_number || patient.phone,
+      address: data.address,
+      emergencyContactName: data.emergency_contact_name,
+      emergencyContactNumber: data.emergency_contact_no,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at ?? null
+    } satisfies PatientProfileDetail;
+  };
 
   const fetchPatientAppointments = async (patientId: string) => {
     const supabase = createClient();
@@ -527,60 +678,7 @@ export default function PatientsPage() {
       throw error;
     }
 
-    const transformed: PatientAppointmentDetail[] = (data || []).map((apt: any) => {
-      const bestStart = apt.booked_start_time || apt.proposed_start_time || apt.requested_start_time || apt.created_at;
-      const displayDate = new Date(bestStart);
-      const year = displayDate.getFullYear();
-      const month = String(displayDate.getMonth() + 1).padStart(2, "0");
-      const day = String(displayDate.getDate()).padStart(2, "0");
-      const hours = String(displayDate.getHours()).padStart(2, "0");
-      const minutes = String(displayDate.getMinutes()).padStart(2, "0");
-
-      const calculateDuration = (start?: string | null, end?: string | null) => {
-        if (!start || !end) return "60 min";
-        const startDate = new Date(start);
-        const endDate = new Date(end);
-        const diffMs = endDate.getTime() - startDate.getTime();
-        if (diffMs <= 0) return "60 min";
-        const diffMinutes = Math.round(diffMs / 60000);
-        return `${diffMinutes} min`;
-      };
-
-      const patientRecord = apt.patient;
-      const userRecord = patientRecord?.users;
-      const nameParts = [userRecord?.first_name, userRecord?.middle_name, userRecord?.last_name]
-        .filter(Boolean)
-        .map((part: string) => part.trim());
-      const fullName = nameParts.join(" ") || "Unnamed Patient";
-
-      const doctorUser = apt.doctors?.users;
-      const doctorName = doctorUser
-        ? `Dr. ${doctorUser.last_name || "Unknown"}`
-        : "Dr. Unknown";
-
-      return {
-        id: apt.appointment_id,
-        patientName: fullName,
-        patientEmail: userRecord?.email || "N/A",
-        patientPhone: userRecord?.phone_number || "N/A",
-        emergencyContactName: patientRecord?.emergency_contact_name || "N/A",
-        emergencyContactNumber: patientRecord?.emergency_contact_no || "N/A",
-        concern: apt.concern || "N/A",
-        status: apt.status,
-        date: `${year}-${month}-${day}`,
-        time: `${hours}:${minutes}`,
-        duration: calculateDuration(apt.booked_start_time || apt.proposed_start_time || apt.requested_start_time, apt.booked_end_time || apt.proposed_end_time || null),
-        doctorId: apt.doctor_id,
-        doctorName,
-        doctorNote: apt.doctor_note,
-        requestedAt: apt.created_at,
-        proposedStartTime: apt.proposed_start_time,
-        proposedEndTime: apt.proposed_end_time,
-        bookedStartTime: apt.booked_start_time,
-        bookedEndTime: apt.booked_end_time,
-        statusHistory: []
-      } as PatientAppointmentDetail;
-    });
+    const transformed: PatientAppointmentDetail[] = (data || []).map((apt: any) => transformAppointmentRecord(apt));
 
     return transformed;
   };
@@ -752,6 +850,14 @@ export default function PatientsPage() {
         previous ? { ...previous, doctorNote: trimmedDraft.length ? trimmedDraft : null } : previous
       );
 
+      setClinicHistoryAppointments((previous) =>
+        previous.map((appointment) =>
+          appointment.id === selectedAppointment.id
+            ? { ...appointment, doctorNote: trimmedDraft.length ? trimmedDraft : null }
+            : appointment
+        )
+      );
+
       setDoctorNoteSuccess(trimmedDraft.length ? "Doctor note updated." : "Doctor note cleared.");
     } catch (error) {
       console.error("Unexpected error saving doctor note:", error);
@@ -769,6 +875,36 @@ export default function PatientsPage() {
       patient.phone.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [rosterPatients, searchTerm]);
+
+  const filteredHistoryAppointments = useMemo(() => {
+    const normalizedTerm = historySearchTerm.trim().toLowerCase();
+    return clinicHistoryAppointments.filter((appointment) => {
+      const matchesStatus =
+  historyStatusFilter === "all" ? true : appointment.status === historyStatusFilter;
+
+      if (!matchesStatus) return false;
+
+      if (!normalizedTerm) return true;
+
+      const termSources = [
+        appointment.patientName,
+        appointment.patientEmail,
+        appointment.patientPhone,
+        appointment.doctorName,
+        appointment.concern || "",
+        appointment.doctorNote || ""
+      ];
+
+      return termSources.some((source) => source.toLowerCase().includes(normalizedTerm));
+    });
+  }, [clinicHistoryAppointments, historySearchTerm, historyStatusFilter]);
+
+  const historyFilterOptions: Array<{ key: "all" | "completed" | "cancelled" | "rejected"; label: string }> = [
+    { key: "all", label: "All" },
+    { key: "completed", label: "Completed" },
+    { key: "cancelled", label: "Cancelled" },
+    { key: "rejected", label: "Rejected" }
+  ];
 
   return (
     <div className="space-y-6">
@@ -937,21 +1073,126 @@ export default function PatientsPage() {
 
       {activeTab === "history" && (
         <Card className="bg-white border border-gray-200 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-[hsl(258_46%_25%)] flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Appointment History (Coming Soon)
-            </CardTitle>
-            <CardDescription className="text-[hsl(258_22%_50%)]">
-              Past appointments for this clinic will appear here. Filters and details will be added in the next steps.
-            </CardDescription>
+          <CardHeader className="pb-4">
+            <div>
+              <CardTitle className="text-[hsl(258_46%_25%)] flex items-center gap-2">
+                <FileText className="h-4 w-4" />
+                Appointment History
+              </CardTitle>
+              <CardDescription className="text-[hsl(258_22%_50%)]">Review completed and closed appointments for your patients.</CardDescription>
+              <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="relative w-full md:w-80">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[hsl(258_22%_50%)]" />
+                  <Input
+                    placeholder="Search by patient, doctor, or note"
+                    value={historySearchTerm}
+                    onChange={(event) => setHistorySearchTerm(event.target.value)}
+                    className="pl-9 h-9 text-[hsl(258_46%_25%)] placeholder:text-[hsl(258_22%_50%)]"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {historyFilterOptions.map(({ key, label }) => (
+                    <Button
+                      key={key}
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className={`cursor-pointer border ${historyStatusFilter === key
+                          ? "bg-[hsl(258_46%_25%)] text-white border-[hsl(258_46%_25%)] hover:bg-[hsl(258_46%_25%/0.92)]"
+                          : "text-[hsl(258_46%_25%)] border-[hsl(258_22%_65%)] hover:bg-purple-50"}
+                      `}
+                      onClick={() => setHistoryStatusFilter(key)}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="flex h-48 flex-col items-center justify-center gap-2 text-[hsl(258_22%_50%)]">
-              <Clock className="h-10 w-10 opacity-50" />
-              <p className="text-sm">History view is under construction.</p>
-              <p className="text-xs">We will surface completed and cancelled appointments by week soon.</p>
-            </div>
+            {isLoadingHistoryList ? (
+              <div className="flex h-48 items-center justify-center text-[hsl(258_22%_50%)]">
+                <div className="flex items-center gap-2 text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading appointment history…
+                </div>
+              </div>
+            ) : historyListError ? (
+              <div className="flex h-48 flex-col items-center justify-center gap-2 text-red-600">
+                <AlertCircle className="h-6 w-6" />
+                <p className="text-sm text-center">{historyListError}</p>
+              </div>
+            ) : filteredHistoryAppointments.length === 0 ? (
+              <div className="flex h-48 flex-col items-center justify-center gap-3 text-[hsl(258_22%_50%)]">
+                <Clock className="h-8 w-8 opacity-50" />
+                <p className="text-sm">No past appointments match the current filters.</p>
+                <p className="text-xs">Adjust the status filter or search to see more results.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredHistoryAppointments.map((appointment) => {
+                  const initials = getInitials(appointment.patientName);
+                  const visitStart = appointment.bookedStartTime || appointment.proposedStartTime || appointment.requestedAt;
+                  const visitDateLabel = formatDateShortFromISO(visitStart) || formatDateShortFromISO(appointment.requestedAt);
+                  const visitTimeLabel =
+                    formatTimeRange(appointment.bookedStartTime || appointment.proposedStartTime || appointment.requestedAt, appointment.bookedEndTime || appointment.proposedEndTime || null) ||
+                    formatTime12h(appointment.time);
+                  const statusTimestamp = appointment.bookedEndTime || appointment.bookedStartTime || appointment.proposedEndTime || appointment.proposedStartTime || appointment.requestedAt;
+                  const statusDateLabel = statusTimestamp ? formatDateShortFromISO(statusTimestamp) : "-";
+
+                  return (
+                    <button
+                      key={appointment.id}
+                      type="button"
+                      onClick={() => handleAppointmentSelect(appointment)}
+                      className="w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-transform transition-colors hover:border-[hsl(258_46%_25%)] hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 cursor-pointer"
+                    >
+                      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                        <div className="flex flex-1 items-start gap-3 min-w-0">
+                          <Avatar className="h-10 w-10 flex-shrink-0">
+                            <AvatarFallback className="bg-[hsl(258_22%_65%)] text-[hsl(258_46%_25%)] font-semibold">
+                              {initials}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="space-y-2 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-semibold text-[hsl(258_46%_25%)]">{appointment.patientName}</p>
+                              <span className="text-xs text-[hsl(258_22%_50%)]">{appointment.patientEmail}</span>
+                            </div>
+                            <div className="text-xs text-[hsl(258_22%_50%)]">
+                              Doctor: <span className="font-medium text-[hsl(258_46%_25%)]">{appointment.doctorName}</span>
+                            </div>
+                            <div className="flex flex-wrap gap-4 text-xs text-[hsl(258_22%_50%)]">
+                              <span>Visit: <span className="font-medium text-[hsl(258_46%_25%)]">{visitDateLabel}</span></span>
+                              <span>Time: <span className="font-medium text-[hsl(258_46%_25%)]">{visitTimeLabel}</span></span>
+                            </div>
+                            <div className="min-w-0 space-y-2">
+                              <div className="flex w-full items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5">
+                                <MessageCircle className="h-3.5 w-3.5 flex-shrink-0 text-amber-900" />
+                                <span className="text-xs font-semibold text-amber-900 flex-shrink-0">Concern:</span>
+                                <span className="flex-1 truncate text-xs text-amber-900">{appointment.concern || "General Consultation"}</span>
+                              </div>
+                              {appointment.doctorNote && (
+                                <div className="flex w-full items-center gap-2 rounded-md border border-purple-200 bg-purple-50 px-3 py-1.5 text-[hsl(258_46%_25%)] shadow-sm">
+                                  <NotebookPen className="h-3 w-3 flex-shrink-0" />
+                                  <span className="text-xs font-semibold flex-shrink-0">Note:</span>
+                                  <span className="flex-1 truncate text-xs">{appointment.doctorNote}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <Badge className={`text-xs border ${getStatusColor(appointment.status)} flex-shrink-0`}>{getStatusDisplayLabel(appointment.status)}</Badge>
+                          <span className="text-xs text-[hsl(258_22%_50%)]">Updated: <span className="font-medium text-[hsl(258_46%_25%)]">{statusDateLabel}</span></span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
