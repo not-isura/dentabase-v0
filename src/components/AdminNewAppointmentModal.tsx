@@ -43,6 +43,73 @@ interface AdminNewAppointmentModalProps {
 
 type Step = 'search' | 'schedule';
 
+const ACTIVE_STATUSES = ['requested', 'proposed', 'booked', 'arrived', 'ongoing'] as const;
+type ActiveStatus = typeof ACTIVE_STATUSES[number];
+
+interface ActiveAppointmentSummary {
+  appointment_id: string;
+  status: ActiveStatus;
+  startTime: string;
+  endTime: string | null;
+  doctorId: string;
+  doctorName: string;
+}
+
+const ACTIVE_STATUS_LABELS: Record<ActiveStatus, string> = {
+  requested: 'Requested',
+  proposed: 'Proposed',
+  booked: 'Booked',
+  arrived: 'Arrived',
+  ongoing: 'Ongoing'
+};
+
+const formatActiveTimeRange = (startIso: string, endIso: string | null) => {
+  try {
+    const startDate = new Date(startIso);
+    if (Number.isNaN(startDate.getTime())) {
+      return 'Scheduled';
+    }
+
+    const startLabel = startDate.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+
+    if (!endIso) {
+      return startLabel;
+    }
+
+    const endDate = new Date(endIso);
+    if (Number.isNaN(endDate.getTime())) {
+      return startLabel;
+    }
+
+    const sameDay = startDate.toDateString() === endDate.toDateString();
+    const endLabel = endDate.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+
+    if (sameDay) {
+      return `${startLabel} – ${endLabel}`;
+    }
+
+    const endDateLabel = endDate.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+
+    return `${startLabel} – ${endDateLabel}`;
+  } catch (error) {
+    console.error('Error formatting active appointment time range:', error);
+    return 'Scheduled';
+  }
+};
+
 // Helper functions
 const getWeekStart = (date: Date): Date => {
   const d = new Date(date);
@@ -133,6 +200,8 @@ export function AdminNewAppointmentModal({
   const [filteredPatients, setFilteredPatients] = useState<Patient[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
+  const [activeAppointmentsByPatient, setActiveAppointmentsByPatient] = useState<Record<string, ActiveAppointmentSummary>>({});
+  const [isLoadingActiveAppointments, setIsLoadingActiveAppointments] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -312,6 +381,8 @@ export function AdminNewAppointmentModal({
     setError(null);
     setCurrentWeekStart(getWeekStart(today));
     setShowConfirmDialog(false);
+    setActiveAppointmentsByPatient({});
+    setIsLoadingActiveAppointments(false);
   };
 
   // Validation: Check if selected time range is valid
@@ -505,9 +576,85 @@ export function AdminNewAppointmentModal({
     }
   };
 
+  const fetchActiveAppointmentsForPatients = useCallback(async (patientIds: string[]) => {
+    if (!patientIds.length) {
+      setActiveAppointmentsByPatient({});
+      setIsLoadingActiveAppointments(false);
+      return;
+    }
+
+    try {
+      setIsLoadingActiveAppointments(true);
+      const supabase = createClient();
+
+      const { data, error } = await supabase
+        .from('appointments')
+        .select(`
+          appointment_id,
+          patient_id,
+          doctor_id,
+          status,
+          booked_start_time,
+          booked_end_time,
+          requested_start_time,
+          doctors!inner (
+            doctor_id,
+            users!inner (
+              first_name,
+              middle_name,
+              last_name
+            )
+          )
+        `)
+        .in('patient_id', patientIds)
+        .in('status', [...ACTIVE_STATUSES])
+        .order('booked_start_time', { ascending: true, nullsFirst: true })
+        .order('requested_start_time', { ascending: true, nullsFirst: true });
+
+      if (error) throw error;
+
+      const summaryMap: Record<string, ActiveAppointmentSummary> = {};
+
+      (data || []).forEach((apt: any) => {
+        const startIso: string | null = apt.booked_start_time || apt.requested_start_time;
+        if (!startIso) return;
+
+        const existing = summaryMap[apt.patient_id];
+        const currentTime = new Date(startIso).getTime();
+
+        const doctorRecord = apt.doctors as any;
+        const doctorUsers = doctorRecord?.users as any;
+        const doctorFirstName = typeof doctorUsers?.first_name === 'string' ? doctorUsers.first_name.trim() : '';
+        const doctorLastName = typeof doctorUsers?.last_name === 'string' ? doctorUsers.last_name.trim() : '';
+        const doctorFullName = [doctorFirstName, doctorLastName].filter(Boolean).join(' ');
+        const doctorDisplayName = doctorFullName ? `Dr. ${doctorFullName}` : 'Assigned Doctor';
+        const doctorIdentifier = doctorRecord?.doctor_id || apt.doctor_id || '';
+
+        if (!existing || currentTime < new Date(existing.startTime).getTime()) {
+          summaryMap[apt.patient_id] = {
+            appointment_id: apt.appointment_id,
+            status: (apt.status as ActiveStatus),
+            startTime: startIso,
+            endTime: apt.booked_end_time || null,
+            doctorId: doctorIdentifier,
+            doctorName: doctorDisplayName
+          };
+        }
+      });
+
+      setActiveAppointmentsByPatient(summaryMap);
+    } catch (err) {
+      console.error('Error loading active appointments:', err);
+      setActiveAppointmentsByPatient({});
+    } finally {
+      setIsLoadingActiveAppointments(false);
+    }
+  }, []);
+
   const loadPatients = async () => {
     try {
       setIsLoadingPatients(true);
+      setActiveAppointmentsByPatient({});
       const supabase = createClient();
       
       const { data, error } = await supabase
@@ -534,6 +681,7 @@ export function AdminNewAppointmentModal({
 
       setPatients(transformedData);
       setFilteredPatients(transformedData);
+      await fetchActiveAppointmentsForPatients(transformedData.map((patient) => patient.patient_id));
     } catch (err) {
       console.error('Error loading patients:', err);
       setError('Failed to load patients');
@@ -548,6 +696,9 @@ export function AdminNewAppointmentModal({
   }, [doctorAvailability]);
 
   const handlePatientSelect = (patient: Patient) => {
+    if (isLoadingActiveAppointments || activeAppointmentsByPatient[patient.patient_id]) {
+      return;
+    }
     setSelectedPatient(patient);
     setCurrentStep('schedule');
   };
@@ -703,6 +854,10 @@ export function AdminNewAppointmentModal({
               />
             </div>
 
+            {isLoadingActiveAppointments && !isLoadingPatients && (
+              <p className="text-xs text-gray-500">Checking for active appointments…</p>
+            )}
+
             <div className="border border-gray-200 rounded-lg min-h-[400px] max-h-[400px] overflow-y-auto">
               {isLoadingPatients ? (
                 <div className="p-8 text-center text-gray-500">Loading patients...</div>
@@ -712,24 +867,42 @@ export function AdminNewAppointmentModal({
                 </div>
               ) : (
                 <div className="divide-y divide-gray-200">
-                  {filteredPatients.map((patient) => (
-                    <button
-                      key={patient.patient_id}
-                      onClick={() => handlePatientSelect(patient)}
-                      className="w-full p-4 hover:bg-purple-50 transition-colors text-left flex items-center gap-4"
-                    >
-                      <div className="flex-shrink-0 w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
-                        <User className="h-5 w-5 text-purple-600" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-gray-900">
-                          {`${patient.users.first_name} ${patient.users.middle_name || ''} ${patient.users.last_name}`.trim()}
+                  {filteredPatients.map((patient) => {
+                    const activeSummary = activeAppointmentsByPatient[patient.patient_id];
+                    const isBlocked = isLoadingActiveAppointments || Boolean(activeSummary);
+
+                    return (
+                      <button
+                        key={patient.patient_id}
+                        type="button"
+                        onClick={() => handlePatientSelect(patient)}
+                        disabled={isBlocked}
+                        className={`w-full p-4 text-left flex items-center gap-4 transition-colors ${
+                          isBlocked
+                            ? 'bg-gray-50 cursor-not-allowed opacity-60'
+                            : 'hover:bg-purple-50 cursor-pointer'
+                        }`}
+                      >
+                        <div className="flex-shrink-0 w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                          <User className="h-5 w-5 text-purple-600" />
                         </div>
-                        <div className="text-sm text-gray-600">{patient.users.email}</div>
-                        <div className="text-sm text-gray-500">{patient.users.phone_number}</div>
-                      </div>
-                    </button>
-                  ))}
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-gray-900">
+                            {`${patient.users.first_name} ${patient.users.middle_name || ''} ${patient.users.last_name}`.trim()}
+                          </div>
+                          <div className="text-sm text-gray-600">{patient.users.email}</div>
+                          <div className="text-sm text-gray-500">{patient.users.phone_number}</div>
+
+                          {activeSummary && (
+                            <span className="mt-2 inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700">
+                              <AlertCircle className="h-3.5 w-3.5" />
+                              Active appointment • {ACTIVE_STATUS_LABELS[activeSummary.status]} • {formatActiveTimeRange(activeSummary.startTime, activeSummary.endTime)} • with {activeSummary.doctorName}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
