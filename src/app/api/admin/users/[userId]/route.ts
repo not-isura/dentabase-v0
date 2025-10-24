@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 
@@ -15,10 +15,11 @@ const supabaseAdmin = createClient(
 
 // GET - Fetch single user with all details (RLS-based: only admins can view)
 export async function GET(
-  request: Request,
-  { params }: { params: { userId: string } }
+  request: NextRequest,
+  context: { params: Promise<{ userId: string }> }
 ) {
   try {
+    const { userId } = await context.params;
     // Create server client (respects RLS policies)
     const supabase = await createServerClient();
     
@@ -31,8 +32,6 @@ export async function GET(
         { status: 401 }
       );
     }
-
-    const userId = params.userId;
 
     // Get user basic info - RLS will block if not admin
     const { data: targetUser, error: userError } = await supabase
@@ -109,10 +108,11 @@ export async function GET(
 
 // PATCH - Update user (RLS-based: only admins can update users)
 export async function PATCH(
-  request: Request,
-  { params }: { params: { userId: string } }
+  request: NextRequest,
+  context: { params: Promise<{ userId: string }> }
 ) {
   try {
+    const { userId } = await context.params;
     // Create server client (respects RLS policies)
     const supabase = await createServerClient();
     
@@ -126,7 +126,6 @@ export async function PATCH(
       );
     }
 
-    const userId = params.userId;
     const body = await request.json();
 
     const {

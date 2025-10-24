@@ -62,6 +62,7 @@ interface PatientAppointmentDetail {
   doctorName: string;
   doctorNote?: string | null;
   requestedAt?: string;
+  updatedAt?: string | null;
   proposedStartTime?: string | null;
   proposedEndTime?: string | null;
   bookedStartTime?: string | null;
@@ -217,6 +218,7 @@ function transformAppointmentRecord(apt: any): PatientAppointmentDetail {
     doctorName,
     doctorNote: apt.doctor_note,
     requestedAt: apt.created_at,
+  updatedAt: apt.updated_at || null,
     proposedStartTime: apt.proposed_start_time,
     proposedEndTime: apt.proposed_end_time,
     bookedStartTime: apt.booked_start_time,
@@ -337,6 +339,7 @@ export default function PatientsPage() {
           booked_start_time,
           booked_end_time,
           created_at,
+          updated_at,
           patient:patient_id (
             patient_id,
             emergency_contact_name,
@@ -643,6 +646,7 @@ export default function PatientsPage() {
           booked_start_time,
           booked_end_time,
           created_at,
+          updated_at,
           patient:patient_id (
             patient_id,
             emergency_contact_name,
@@ -1138,7 +1142,13 @@ export default function PatientsPage() {
                   const visitTimeLabel =
                     formatTimeRange(appointment.bookedStartTime || appointment.proposedStartTime || appointment.requestedAt, appointment.bookedEndTime || appointment.proposedEndTime || null) ||
                     formatTime12h(appointment.time);
-                  const statusTimestamp = appointment.bookedEndTime || appointment.bookedStartTime || appointment.proposedEndTime || appointment.proposedStartTime || appointment.requestedAt;
+                  const statusTimestamp =
+                    appointment.updatedAt ||
+                    appointment.bookedEndTime ||
+                    appointment.bookedStartTime ||
+                    appointment.proposedEndTime ||
+                    appointment.proposedStartTime ||
+                    appointment.requestedAt;
                   const statusDateLabel = statusTimestamp ? formatDateShortFromISO(statusTimestamp) : "-";
 
                   return (
