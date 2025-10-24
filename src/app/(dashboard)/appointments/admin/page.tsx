@@ -310,6 +310,15 @@ export default function AdminAppointmentsPage() {
     });
   };
 
+  const goToCurrentWeek = () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const day = today.getDay();
+    const sunday = new Date(today);
+    sunday.setDate(today.getDate() - day);
+    setCurrentWeekStart(sunday);
+  };
+
   // Get availability for a specific date (checks all doctors who have appointments on that day)
   const getAvailabilityForDate = (date: Date): {startTime: string, endTime: string} | null => {
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
@@ -328,13 +337,6 @@ export default function AdminAppointmentsPage() {
         }
       }
 
-      function formatTimeRange(start?: string | null, end?: string | null) {
-        if (!start) return '';
-        const startLabel = formatTime12hFromISO(start);
-        if (!end) return startLabel;
-        const endLabel = formatTime12hFromISO(end);
-        return `${startLabel} - ${endLabel}`;
-      }
       return null;
     }
     
@@ -1126,7 +1128,30 @@ export default function AdminAppointmentsPage() {
   const demoTodayStr = toYMD(minDate);
   const todayAppointments = appointments.filter(apt => apt.date === demoTodayStr);
   const pendingApprovals = appointments.filter(apt => apt.status === "requested").length;
-  const completedThisWeek = appointments.filter(apt => apt.status === "completed").length;
+
+  const startOfWeek = (() => {
+    const sunday = new Date(minDate);
+    const day = sunday.getDay();
+    sunday.setDate(sunday.getDate() - day);
+    sunday.setHours(0, 0, 0, 0);
+    return sunday;
+  })();
+
+  const endOfWeek = (() => {
+    const saturday = new Date(startOfWeek);
+    saturday.setDate(saturday.getDate() + 6);
+    saturday.setHours(23, 59, 59, 999);
+    return saturday;
+  })();
+
+  const startOfWeekStr = toYMD(startOfWeek);
+  const endOfWeekStr = toYMD(endOfWeek);
+
+  const completedThisWeek = appointments.filter(apt => {
+    if (apt.status !== "completed") return false;
+    if (!apt.date) return false;
+    return apt.date >= startOfWeekStr && apt.date <= endOfWeekStr;
+  }).length;
 
   // Determine if any filters deviate from defaults
   // Defaults: Date = today (single day), Status = all, fromStart = false
@@ -2136,7 +2161,7 @@ export default function AdminAppointmentsPage() {
       {activeTab === "weekly" && (
         <Card id="tab-weekly-panel" aria-labelledby="tab-weekly" className="bg-white border border-gray-200 shadow-sm md:h-[48rem]">
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
               <div>
                 <CardTitle className="flex items-center text-[hsl(258_46%_25%)] mb-1">
                   <CalendarIcon className="mr-2 h-5 w-5" />
@@ -2145,25 +2170,43 @@ export default function AdminAppointmentsPage() {
                 <CardDescription className="text-[hsl(258_22%_50%)]">Weekly view with appointment details</CardDescription>
               </div>
               {/* Week Navigation */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3 flex-wrap justify-end">
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goToCurrentWeek}
+                    className="cursor-pointer hover:bg-purple-50 active:bg-purple-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97] text-[hsl(258_46%_25%)] border-purple-200"
+                  >
+                    Today
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigateWeek('prev')}
+                    className="h-8 w-8 p-0 border-gray-300 hover:bg-purple-50"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-sm font-semibold text-[hsl(258_46%_25%)] min-w-[180px] text-center">
+                    {formatDateRange(currentWeekStart)}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigateWeek('next')}
+                    className="h-8 w-8 p-0 border-gray-300 hover:bg-purple-50"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
                 <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigateWeek('prev')}
-                  className="h-8 w-8 p-0 border-gray-300 hover:bg-purple-50"
+                  style={{ backgroundColor: 'hsl(258, 46%, 25%)', color: 'white' }}
+                  className="hover:opacity-90 cursor-pointer active:opacity-80 transition-opacity transition-transform duration-200 ease-in-out active:scale-[0.97]"
+                  onClick={() => setIsNewAppointmentOpen(true)}
                 >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <span className="text-sm font-semibold text-[hsl(258_46%_25%)] min-w-[180px] text-center">
-                  {formatDateRange(currentWeekStart)}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigateWeek('next')}
-                  className="h-8 w-8 p-0 border-gray-300 hover:bg-purple-50"
-                >
-                  <ChevronRight className="h-4 w-4" />
+                  <Plus className="mr-2 h-4 w-4" />
+                  New Appointment
                 </Button>
               </div>
             </div>
@@ -2573,7 +2616,7 @@ export default function AdminAppointmentsPage() {
       {activeTab === "calendar" && (
         <Card id="tab-calendar-panel" aria-labelledby="tab-calendar" className="bg-white border border-gray-200 shadow-sm md:h-[48rem]">
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
               <div>
                 <CardTitle className="flex items-center text-[hsl(258_46%_25%)] mb-1">
                   <CalendarIcon className="mr-2 h-5 w-5" />
@@ -2582,34 +2625,35 @@ export default function AdminAppointmentsPage() {
                 <CardDescription className="text-[hsl(258_22%_50%)]">Monthly overview of all appointments</CardDescription>
               </div>
               {/* Month Navigation */}
-              <div className="flex items-center gap-2 relative">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={goToToday}
-                  className="cursor-pointer hover:bg-purple-50 active:bg-purple-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97] text-[hsl(258_46%_25%)] border-purple-200"
-                >
-                  Today
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigateCalendarMonth("prev")}
-                  className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <div className="relative">
-                  <button
-                    onClick={handleMonthYearButtonClick}
-                    className="text-sm font-semibold text-[hsl(258_46%_25%)] min-w-[140px] text-center px-3 py-1.5 rounded-md hover:bg-purple-50 active:bg-purple-100 transition-colors cursor-pointer"
+              <div className="flex items-center gap-3 flex-wrap justify-end">
+                <div className="flex items-center gap-2 relative">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goToToday}
+                    className="cursor-pointer hover:bg-purple-50 active:bg-purple-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97] text-[hsl(258_46%_25%)] border-purple-200"
                   >
-                    {formatMonthYear(calendarMonth)}
-                  </button>
-                  
-                  {/* Month/Year Picker Dropdown */}
-                  {isMonthYearPickerOpen && (
-                    <div ref={monthYearPickerRef} className="absolute right-0 top-full mt-2 z-50 bg-white rounded-lg shadow-xl border border-gray-200 w-[280px] p-3">
+                    Today
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigateCalendarMonth("prev")}
+                    className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <div className="relative">
+                    <button
+                      onClick={handleMonthYearButtonClick}
+                      className="text-sm font-semibold text-[hsl(258_46%_25%)] min-w-[140px] text-center px-3 py-1.5 rounded-md hover:bg-purple-50 active:bg-purple-100 transition-colors cursor-pointer"
+                    >
+                      {formatMonthYear(calendarMonth)}
+                    </button>
+                    
+                    {/* Month/Year Picker Dropdown */}
+                    {isMonthYearPickerOpen && (
+                      <div ref={monthYearPickerRef} className="absolute right-0 top-full mt-2 z-50 bg-white rounded-lg shadow-xl border border-gray-200 w-[280px] p-3">
                       {/* Header with navigation and view toggle */}
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-1">
@@ -2724,16 +2768,25 @@ export default function AdminAppointmentsPage() {
                           Today
                         </Button>
                       </div>
-                    </div>
-                  )}
+                      </div>
+                    )}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigateCalendarMonth("next")}
+                    className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
                 </div>
                 <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigateCalendarMonth("next")}
-                  className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors transition-transform duration-200 ease-in-out active:scale-[0.97]"
+                  style={{ backgroundColor: 'hsl(258, 46%, 25%)', color: 'white' }}
+                  className="hover:opacity-90 cursor-pointer active:opacity-80 transition-opacity transition-transform duration-200 ease-in-out active:scale-[0.97]"
+                  onClick={() => setIsNewAppointmentOpen(true)}
                 >
-                  <ChevronRight className="h-4 w-4" />
+                  <Plus className="mr-2 h-4 w-4" />
+                  New Appointment
                 </Button>
               </div>
             </div>
