@@ -37,6 +37,7 @@ interface Appointment {
   duration: string;
   doctorId: string;
   doctorName: string;
+  doctorNote?: string | null;
   notes?: string;
   actionReason?: string;
   // ISO timestamp when the appointment was requested
@@ -206,6 +207,14 @@ function formatTime12hFromISO(iso?: string) {
   }).format(dt);
 }
 
+function formatTimeRange(start?: string | null, end?: string | null) {
+  if (!start) return "";
+  const startLabel = formatTime12hFromISO(start);
+  if (!end) return startLabel;
+  const endLabel = formatTime12hFromISO(end);
+  return `${startLabel} - ${endLabel}`;
+}
+
 export default function AdminAppointmentsPage() {
   // Notification state
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -318,6 +327,14 @@ export default function AdminAppointmentsPage() {
           return { startTime: dayAvail.startTime, endTime: dayAvail.endTime };
         }
       }
+
+      function formatTimeRange(start?: string | null, end?: string | null) {
+        if (!start) return '';
+        const startLabel = formatTime12hFromISO(start);
+        if (!end) return startLabel;
+        const endLabel = formatTime12hFromISO(end);
+        return `${startLabel} - ${endLabel}`;
+      }
       return null;
     }
     
@@ -387,6 +404,7 @@ export default function AdminAppointmentsPage() {
           availability_id,
           feedback_type,
           feedback,
+          doctor_note,
           created_at,
           updated_at,
           is_active,
@@ -511,7 +529,10 @@ export default function AdminAppointmentsPage() {
 
         // Determine which time to display based on status
         let displayTime = apt.requested_start_time;
-        if (apt.status === 'booked' && apt.booked_start_time) {
+        if (
+          ['booked', 'arrived', 'ongoing', 'completed'].includes(apt.status) &&
+          apt.booked_start_time
+        ) {
           displayTime = apt.booked_start_time;
         } else if (apt.status === 'proposed' && apt.proposed_start_time) {
           displayTime = apt.proposed_start_time;
@@ -562,6 +583,7 @@ export default function AdminAppointmentsPage() {
           doctorName: apt.doctors?.users 
             ? `Dr. ${apt.doctors.users.last_name || 'Unknown'}`
             : 'Dr. Unknown',
+          doctorNote: apt.doctor_note || null,
           notes: apt.feedback || '',
           requestedAt: apt.created_at,
           proposedStartTime: apt.proposed_start_time,
@@ -1027,7 +1049,9 @@ export default function AdminAppointmentsPage() {
   const [isNewAppointmentOpen, setIsNewAppointmentOpen] = useState(false);
   const [currentUserDoctorId, setCurrentUserDoctorId] = useState<string>('');
   const [currentUserDoctorName, setCurrentUserDoctorName] = useState<string>('');
-  const [appointmentNotes, setAppointmentNotes] = useState("");
+  const [doctorNoteDraft, setDoctorNoteDraft] = useState("");
+  const [isSavingDoctorNote, setIsSavingDoctorNote] = useState(false);
+  const [doctorNoteError, setDoctorNoteError] = useState<string | null>(null);
   type ActionType = "accept" | "arrive" | "ongoing" | "complete" | "reject" | "cancel";
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
   const [isReasonDialogOpen, setIsReasonDialogOpen] = useState(false);
@@ -1336,7 +1360,8 @@ export default function AdminAppointmentsPage() {
 
   const handleAppointmentClick = async (appointment: Appointment) => {
     setSelectedAppointment(appointment);
-    setAppointmentNotes(appointment.notes || "");
+    setDoctorNoteDraft(appointment.doctorNote || "");
+    setDoctorNoteError(null);
     setIsAppointmentModalOpen(true);
     
     // Fetch status history for this appointment
@@ -1380,16 +1405,47 @@ export default function AdminAppointmentsPage() {
     }
   };
 
-  const handleAddNotes = () => {
-    if (selectedAppointment) {
+  const handleSaveDoctorNote = async () => {
+    if (!selectedAppointment) return;
+
+    const trimmed = doctorNoteDraft.trim();
+
+    try {
+      setIsSavingDoctorNote(true);
+      setDoctorNoteError(null);
+
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('appointments')
+        .update({ doctor_note: trimmed.length ? trimmed : null })
+        .eq('appointment_id', selectedAppointment.id);
+
+      if (error) {
+        console.error('Error saving doctor note:', error);
+        setDoctorNoteError('Failed to save note. Please try again.');
+        return;
+      }
+
       setAppointments(prev =>
         prev.map(apt =>
           apt.id === selectedAppointment.id
-            ? { ...apt, notes: appointmentNotes }
+            ? { ...apt, doctorNote: trimmed.length ? trimmed : null }
             : apt
         )
       );
-      showNotification('success', 'Notes Updated', 'Appointment notes have been saved.');
+
+      setSelectedAppointment(prev =>
+        prev ? { ...prev, doctorNote: trimmed.length ? trimmed : null } : prev
+      );
+
+      setDoctorNoteDraft(trimmed);
+
+      showNotification('success', 'Doctor Note Saved', trimmed.length ? 'Doctor note updated successfully.' : 'Doctor note cleared.');
+    } catch (err) {
+      console.error('Unexpected error saving doctor note:', err);
+      setDoctorNoteError('An unexpected error occurred. Please try again.');
+    } finally {
+      setIsSavingDoctorNote(false);
     }
   };
 
@@ -1695,7 +1751,7 @@ export default function AdminAppointmentsPage() {
 
       {/* Tab Content */}
       {activeTab === "overall" && (
-        <Card id="tab-overall-panel" aria-labelledby="tab-overall" className="bg-white border border-gray-200 shadow-sm md:h-[40rem]">
+  <Card id="tab-overall-panel" aria-labelledby="tab-overall" className="bg-white border border-gray-200 shadow-sm md:min-h-[48rem]">
           <CardHeader>
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -1833,7 +1889,7 @@ export default function AdminAppointmentsPage() {
             {/* Appointments Table with bottom fade indicator */}
             <div className="overflow-x-auto">
               <div className={`relative ${isResetting ? 'opacity-60 transition-opacity duration-150' : 'transition-opacity duration-150'}`}>
-                <div ref={listScrollRef} className="h-[24rem] overflow-y-auto">
+                <div ref={listScrollRef} className="h-[30rem] md:h-[36rem] overflow-y-auto">
                 {(() => {
                   // Show loading state
                   if (isLoadingAppointments) {
@@ -1901,8 +1957,8 @@ export default function AdminAppointmentsPage() {
                           >
                             <td className="py-3 px-4 text-center align-middle">
                               <div className="whitespace-nowrap tabular-nums min-w-[140px] leading-tight mx-auto">
-                                <div className="text-sm font-medium text-[hsl(258_46%_25%)]">{formatDateShortFromISO(appointment.requestedAt)}</div>
-                                <div className="text-sm text-[hsl(258_22%_50%)]">{formatTime12hFromISO(appointment.requestedAt)}</div>
+                                <div className="text-[0.8125rem] font-medium text-[hsl(258_46%_25%)]">{formatDateShortFromISO(appointment.requestedAt)}</div>
+                                <div className="text-xs text-[hsl(258_22%_50%)]">{formatTime12hFromISO(appointment.requestedAt)}</div>
                               </div>
                             </td>
                             <td className="py-3 px-4">
@@ -1913,23 +1969,46 @@ export default function AdminAppointmentsPage() {
                                   </AvatarFallback>
                                 </Avatar>
                                 <div className="text-left">
-                                  <div className="font-medium text-[hsl(258_46%_25%)]">{appointment.patientName}</div>
-                                  <div className="text-sm text-[hsl(258_22%_50%)] flex items-center gap-1">
+                                  <div className="font-medium text-sm text-[hsl(258_46%_25%)]">{appointment.patientName}</div>
+                                  <div className="text-xs text-[hsl(258_22%_50%)] flex items-center gap-1">
                                     <Phone className="h-3 w-3" />
                                     {appointment.patientPhone}
                                   </div>
+                                  {appointment.doctorNote?.trim() && (
+                                    <div className="mt-2 text-xs text-[hsl(258_46%_25%)]">
+                                      <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 text-purple-700 px-2 py-1 font-medium">
+                                        <FileText className="h-3 w-3 flex-shrink-0" />
+                                        <span
+                                          className="max-w-[160px] sm:max-w-[220px] truncate"
+                                          title={appointment.doctorNote}
+                                        >
+                                          {appointment.doctorNote}
+                                        </span>
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </td>
                             <td className="py-3 px-4 align-middle text-center">
                               <div className="whitespace-nowrap tabular-nums min-w-[140px] leading-tight mx-auto">
-                                <div className="text-sm font-medium text-[hsl(258_46%_25%)]">{formatDateShort(appointment.date)}</div>
-                                <div className="text-sm text-[hsl(258_22%_50%)]">{formatTime12h(appointment.time)}</div>
+                                <div className="text-[0.8125rem] font-medium text-[hsl(258_46%_25%)]">{formatDateShortFromISO(appointment.date)}</div>
+                                <div className="text-xs text-[hsl(258_22%_50%)]">
+                                  {(() => {
+                                    if (['requested'].includes(appointment.status)) {
+                                      return formatTime12h(appointment.time);
+                                    }
+                                    return formatTimeRange(
+                                      appointment.bookedStartTime || appointment.proposedStartTime || appointment.requestedAt,
+                                      appointment.bookedEndTime || appointment.proposedEndTime
+                                    ) || formatTime12h(appointment.time);
+                                  })()}
+                                </div>
                               </div>
                             </td>
                             <td className="py-3 px-4 align-middle">
                               <div className="flex justify-center mx-auto">
-                                <Badge className={`status-badge ${getStatusColor(appointment.status)}`}>
+                                <Badge className={`status-badge text-[10px] sm:text-xs ${getStatusColor(appointment.status)}`}>
                                   {getStatusDisplayLabel(appointment.status)}
                                 </Badge>
                               </div>
@@ -2770,7 +2849,7 @@ export default function AdminAppointmentsPage() {
                   <CalendarIcon className="mr-2 h-5 w-5" />
                   Appointment Details
                 </DialogTitle>
-                <Badge className={`status-badge ${getStatusColor(selectedAppointment.status)}`}>
+                <Badge className={`status-badge text-[10px] sm:text-xs ${getStatusColor(selectedAppointment.status)}`}>
                   {getStatusDisplayLabel(selectedAppointment.status)}
                 </Badge>
               </div>
@@ -2879,7 +2958,21 @@ export default function AdminAppointmentsPage() {
                       </div>
                       <div>
                         <label className="text-sm font-medium text-[hsl(258_22%_50%)]">Requested Time</label>
-                        <p className="text-[hsl(258_46%_25%)]">{formatTime12h(selectedAppointment.time)}</p>
+                        <p className="text-[hsl(258_46%_25%)]">
+                          {(() => {
+                            const status = selectedAppointment.status;
+                            if (status === 'requested') {
+                              return formatTime12h(selectedAppointment.time);
+                            }
+                            const start = selectedAppointment.bookedStartTime
+                              || selectedAppointment.proposedStartTime
+                              || selectedAppointment.requestedAt;
+                            const end = selectedAppointment.bookedEndTime
+                              || selectedAppointment.proposedEndTime
+                              || null;
+                            return formatTimeRange(start, end) || formatTime12h(selectedAppointment.time);
+                          })()}
+                        </p>
                       </div>
                     </div>
 
@@ -2896,6 +2989,59 @@ export default function AdminAppointmentsPage() {
                       <p className="text-[hsl(258_46%_25%)] mt-1">{selectedAppointment.actionReason}</p>
                     </div>
                   )}
+                </CardContent>
+              </Card>
+
+              {/* Doctor Note Editor */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Manage Doctor Note
+                  </CardTitle>
+                  <CardDescription>
+                    Add quick context for this appointment. Patients never see this note.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <textarea
+                    value={doctorNoteDraft}
+                    onChange={(e) => {
+                      setDoctorNoteDraft(e.target.value);
+                      if (doctorNoteError) setDoctorNoteError(null);
+                    }}
+                    className="w-full min-h-[120px] rounded-md border border-purple-200 bg-white px-3 py-2 text-sm text-[hsl(258_46%_25%)] shadow-sm focus:border-purple-400 focus:outline-none focus:ring-2 focus:ring-purple-200"
+                    placeholder="Type a quick reminder for the care team…"
+                  />
+                  {doctorNoteError && (
+                    <p className="text-sm text-red-600">{doctorNoteError}</p>
+                  )}
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (selectedAppointment) {
+                          setDoctorNoteDraft(selectedAppointment.doctorNote || "");
+                          setDoctorNoteError(null);
+                        }
+                      }}
+                      disabled={isSavingDoctorNote || doctorNoteDraft === (selectedAppointment?.doctorNote || "")}
+                      className="text-[hsl(258_46%_25%)] hover:bg-purple-50"
+                    >
+                      Reset
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleSaveDoctorNote}
+                      disabled={isSavingDoctorNote || doctorNoteDraft === (selectedAppointment?.doctorNote || "")}
+                      className="bg-[hsl(258_46%_25%)] text-white hover:bg-[hsl(258_46%_28%)]"
+                    >
+                      {isSavingDoctorNote ? 'Saving…' : 'Save Note'}
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
 
