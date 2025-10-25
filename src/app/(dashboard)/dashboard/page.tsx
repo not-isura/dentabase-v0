@@ -1,14 +1,50 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Calendar, Users, FileText, TrendingUp, Clock, AlertCircle, Sparkles } from "lucide-react";
 import { DashboardMessageHandler } from "@/components/dashboard-message-handler";
 import { useAuth } from "@/hooks/useAuth";
+import { useRouter } from "next/navigation";
+import { AuthLoadingSpinner } from "@/components/auth-loading-spinner";
 
 export default function DashboardPage() {
   // 🎯 Get real user data from Auth Context
   const { displayUser, isLoading: isLoadingUser } = useAuth();
+  const router = useRouter();
+  const [isRedirecting, setIsRedirecting] = useState(true);
+
+  useEffect(() => {
+    if (isLoadingUser) {
+      return;
+    }
+
+    if (!displayUser) {
+      const message = encodeURIComponent("Please login to continue");
+      router.replace(`/login?type=warning&message=${message}`);
+      return;
+    }
+
+    const roleRedirectMap: Record<string, string> = {
+      patient: "/appointments/patient",
+      dentist: "/appointments/admin",
+      dental_staff: "/appointments/admin",
+      admin: "/settings",
+    };
+
+    const targetRoute = roleRedirectMap[displayUser.role] ?? "/settings";
+
+    if (targetRoute === "/dashboard") {
+      setIsRedirecting(false);
+      return;
+    }
+
+    router.replace(targetRoute);
+  }, [displayUser, isLoadingUser, router]);
+
+  if (isLoadingUser || isRedirecting) {
+    return <AuthLoadingSpinner />;
+  }
 
   const stats = [
     {
