@@ -19,7 +19,7 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     href: "/dashboard",
     icon: Home,
     allowedRoles: ALL_ROLES,
-    showInSidebar: true,
+    showInSidebar: false,
     exact: true,
   },
   {
@@ -31,7 +31,7 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     exact: true,
   },
   {
-    label: "Admin Appointments",
+    label: "Appointments",
     href: "/appointments/admin",
     icon: Calendar,
     allowedRoles: ["dentist", "dental_staff"],
@@ -47,7 +47,7 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     exact: true,
   },
   {
-    label: "Patients",
+  label: "Patients and Records",
     href: "/patients",
     icon: Users,
     allowedRoles: ["dentist", "dental_staff"],

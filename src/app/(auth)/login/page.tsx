@@ -100,19 +100,19 @@ export default function LoginPage() {
       // 3. Redirect based on role
       switch (userData.role) {
         case "patient":
-          router.push("/dashboard");
+          router.push("/appointments/patient");
           break;
         case "dentist":
-          router.push("/dashboard");
+          router.push("/appointments/admin");
           break;
         case "dental_staff":
-          router.push("/dashboard");
+          router.push("/appointments/admin");
           break;
         case "admin":
           router.push("/settings");
           break;
         default:
-          router.push("/dashboard");
+          router.push("/settings");
       }
 
       // Force a router refresh to update session state

@@ -1,9 +1,8 @@
 "use client";
 
-import React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { BarChart3, ArrowLeft, ChevronRight, Download, Activity, FileText } from "lucide-react";
+import { AlertTriangle, BarChart3, ChevronRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 export default function ReportsAnalyticsPage() {
@@ -11,55 +10,33 @@ export default function ReportsAnalyticsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header with Back Button */}
       <div className="flex items-center gap-2 text-sm">
         <button
-          onClick={() => router.push('/settings')}
-          className="text-[hsl(258_22%_50%)] hover:text-[hsl(258_46%_25%)] transition-colors cursor-pointer font-medium"
+          onClick={() => router.push("/settings")}
+          className="cursor-pointer font-medium text-[hsl(258_22%_50%)] transition-colors hover:text-[hsl(258_46%_25%)]"
         >
           Settings
         </button>
         <ChevronRight className="h-4 w-4 text-[hsl(258_22%_40%)]" />
-        <span className="text-[hsl(258_46%_25%)] font-semibold">Reports & Analytics</span>
+        <span className="font-semibold text-[hsl(258_46%_25%)]">Reports & Analytics</span>
       </div>
 
-      {/* Page Title */}
-      <div>
-        <h2 className="text-2xl font-bold text-[hsl(258_46%_25%)] flex items-center">
-          <BarChart3 className="h-6 w-6 mr-3" />
-          Reports & Analytics
-        </h2>
-        <p className="text-[hsl(258_22%_50%)]">System reports and user activity analytics</p>
-      </div>
-
-      {/* Placeholder Content */}
       <Card className="bg-white">
         <CardHeader>
-          <CardTitle className="text-[hsl(258_46%_25%)]">Reports & Analytics</CardTitle>
-          <CardDescription>View system reports and analytics</CardDescription>
+          <CardTitle className="flex items-center gap-2 text-[hsl(258_46%_25%)]">
+            <BarChart3 className="h-5 w-5" />
+            Reports & Analytics
+          </CardTitle>
+          <CardDescription>This section is under construction.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-12 text-[hsl(258_22%_50%)]">
-            <BarChart3 className="h-16 w-16 mx-auto mb-4 opacity-50" />
-            <h3 className="text-lg font-medium text-[hsl(258_46%_25%)] mb-2">Reports & Analytics Page</h3>
-            <p>This page will contain reports and analytics functionality.</p>
-            <p className="mt-2">Features will include: user activity logs, system usage reports, export data, and performance metrics.</p>
-            
-            {/* Placeholder Action Buttons */}
-            <div className="flex justify-center space-x-4 mt-6">
-              <Button variant="outline" className="cursor-pointer">
-                <Activity className="h-4 w-4 mr-2" />
-                Activity Logs
-              </Button>
-              <Button variant="outline" className="cursor-pointer">
-                <FileText className="h-4 w-4 mr-2" />
-                Usage Reports
-              </Button>
-              <Button variant="outline" className="cursor-pointer">
-                <Download className="h-4 w-4 mr-2" />
-                Export Data
-              </Button>
-            </div>
+          <div className="flex flex-col items-center gap-4 py-10 text-[hsl(258_22%_50%)]">
+            <AlertTriangle className="h-12 w-12 text-[hsl(35_90%_55%)]" />
+            <p className="max-w-md text-center text-sm">
+              Insights and exports are coming soon. We&apos;ll surface activity logs, usage summaries, and data downloads
+              once the reporting pipeline is ready.
+            </p>
+            <Button variant="outline" className="cursor-pointer" onClick={() => router.push("/settings")}>Back to Settings</Button>
           </div>
         </CardContent>
       </Card>

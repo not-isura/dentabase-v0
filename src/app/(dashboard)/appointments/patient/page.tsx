@@ -11,6 +11,7 @@ import { StatusFlowGuide } from '@/components/StatusFlowGuide';
 import DoctorSelectionModal from './DoctorSelectionModal';
 import ScheduleSelectionModal from './ScheduleSelectionModal';
 import AppointmentConfirmationModal from './AppointmentConfirmationModal';
+import { Textarea } from "@/components/ui/textarea";
 
 type StatusEntry = {
   date: string;
@@ -150,9 +151,33 @@ const StatusHistory: React.FC<StatusHistoryProps> = ({ history }) => {
               
               {/* Show feedback from staff if available */}
               {entry.feedback && (
-                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-xs font-semibold text-blue-900 mb-1">Message from Clinic:</p>
-                  <p className="text-sm text-blue-800 whitespace-pre-line">{entry.feedback}</p>
+                <div
+                  className={`mt-3 p-3 rounded-lg border ${
+                    entry.status.toLowerCase() === 'cancelled'
+                      ? 'bg-red-50 border-red-200'
+                      : 'bg-blue-50 border-blue-200'
+                  }`}
+                >
+                  <p
+                    className={`text-xs font-semibold mb-1 ${
+                      entry.status.toLowerCase() === 'cancelled'
+                        ? 'text-red-900'
+                        : 'text-blue-900'
+                    }`}
+                  >
+                    {entry.status.toLowerCase() === 'cancelled'
+                      ? 'Reason of Cancellation:'
+                      : 'Message from Clinic:'}
+                  </p>
+                  <p
+                    className={`text-sm whitespace-pre-line ${
+                      entry.status.toLowerCase() === 'cancelled'
+                        ? 'text-red-800'
+                        : 'text-blue-800'
+                    }`}
+                  >
+                    {entry.feedback}
+                  </p>
                 </div>
               )}
               
@@ -280,7 +305,7 @@ interface AppointmentSummaryProps {
   concern: string;
   isLoading?: boolean;
   appointmentId?: string;
-  onCancel?: () => void;
+  onCancel?: (reason: string) => Promise<void> | void;
   onConfirm?: () => void; // NEW: Confirm appointment handler
   onCreateNew?: () => void; // NEW: Create new appointment handler
 }
@@ -304,6 +329,15 @@ const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
   // Cancel modal state
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isCancelModalOpen) {
+      setCancelReason("");
+      setCancelError(null);
+    }
+  }, [isCancelModalOpen]);
 
   // Format date and time for display
   const formatDateTime = (isoString: string) => {
@@ -665,11 +699,44 @@ const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
               </span>
             </DialogDescription>
           </DialogHeader>
+
+          <div className="space-y-2 rounded-2xl border border-red-100 bg-red-50/60 p-4">
+            <label
+              htmlFor={`cancel-reason-${appointmentId ?? 'current'}`}
+              className="text-sm font-semibold text-red-900"
+            >
+              Reason for cancellation
+            </label>
+            <Textarea
+              id={`cancel-reason-${appointmentId ?? 'current'}`}
+              value={cancelReason}
+              onChange={(event) => {
+                if (cancelError) {
+                  setCancelError(null);
+                }
+                setCancelReason(event.target.value);
+              }}
+              placeholder="Let the clinic know why you need to cancel..."
+              rows={4}
+              className="rounded-xl border-2 border-red-100 bg-white text-gray-900 placeholder:text-red-300 focus:border-red-300 focus:ring-0"
+              disabled={isCancelling}
+            />
+            <p className="text-xs text-red-700">
+              Sharing a short note helps the clinic prepare for follow-up or rescheduling.
+            </p>
+            {cancelError && (
+              <p className="text-sm font-medium text-red-600">{cancelError}</p>
+            )}
+          </div>
           
           <DialogFooter className="flex-col sm:flex-row gap-3 pt-6">
             <Button
               variant="outline"
-              onClick={() => setIsCancelModalOpen(false)}
+              onClick={() => {
+                setCancelReason("");
+                setCancelError(null);
+                setIsCancelModalOpen(false);
+              }}
               disabled={isCancelling}
               className="w-full sm:w-auto border-2 border-gray-200 hover:bg-gray-50 hover:border-gray-300 font-semibold px-6 py-2.5 rounded-xl transition-all duration-200"
             >
@@ -678,14 +745,21 @@ const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
             <Button
               variant="destructive"
               onClick={async () => {
+                const trimmedReason = cancelReason.trim();
+                if (!trimmedReason) {
+                  setCancelError('Please share a brief reason before cancelling.');
+                  return;
+                }
                 setIsCancelling(true);
                 try {
                   if (onCancel) {
-                    await onCancel();
+                    await onCancel(trimmedReason);
                   }
+                  setCancelReason("");
                   setIsCancelModalOpen(false);
                 } catch (error) {
                   console.error('Error cancelling:', error);
+                  setCancelError('We could not cancel the appointment right now. Please try again.');
                 } finally {
                   setIsCancelling(false);
                 }
@@ -1355,16 +1429,86 @@ export default function AppointmentsPatientPage() {
     }
   };
 
-  const handleCancelAppointment = async () => {
+  const handleCancelAppointment = async (reason: string) => {
     if (!activeAppointment?.appointmentId) return;
+
+    const trimmedReason = reason.trim();
+    if (!trimmedReason) {
+      setAlert({
+        show: true,
+        variant: 'error',
+        message: 'Please provide a reason for cancelling your appointment.'
+      });
+
+      setTimeout(() => {
+        setAlert(null);
+      }, 5000);
+
+      throw new Error('Cancellation reason required');
+    }
 
     try {
       const supabase = createClient();
 
-      // Update appointment status to cancelled
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        throw authError || new Error('You must be logged in to cancel an appointment.');
+      }
+
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('user_id')
+        .eq('auth_id', user.id)
+        .single();
+
+      if (userError || !userData) {
+        throw userError || new Error('Unable to find your account details.');
+      }
+
+      const { data: appointmentData, error: appointmentFetchError } = await supabase
+        .from('appointments')
+        .select('requested_start_time, proposed_start_time, proposed_end_time, booked_start_time, booked_end_time')
+        .eq('appointment_id', activeAppointment.appointmentId)
+        .single();
+
+      if (appointmentFetchError) {
+        throw appointmentFetchError;
+      }
+
+      const relatedTime = appointmentData?.booked_start_time
+        || appointmentData?.proposed_start_time
+        || appointmentData?.requested_start_time
+        || null;
+
+      const relatedEndTime = appointmentData?.booked_end_time
+        || appointmentData?.proposed_end_time
+        || null;
+
+      const { error: historyError } = await supabase
+        .from('appointment_status_history')
+        .insert({
+          appointment_id: activeAppointment.appointmentId,
+          status: 'cancelled',
+          changed_by_user_id: userData.user_id,
+          notes: 'You cancelled this appointment.',
+          feedback: trimmedReason,
+          related_time: relatedTime,
+          related_end_time: relatedEndTime
+        });
+
+      if (historyError) {
+        throw historyError;
+      }
+
       const { error } = await supabase
         .from('appointments')
-        .update({ status: 'cancelled' })
+        .update({
+          status: 'cancelled',
+          updated_at: new Date().toISOString(),
+          feedback: trimmedReason,
+          feedback_type: 'cancelled'
+        })
         .eq('appointment_id', activeAppointment.appointmentId);
 
       if (error) {
@@ -1397,6 +1541,8 @@ export default function AppointmentsPatientPage() {
       setTimeout(() => {
         setAlert(null);
       }, 5000);
+
+      throw error;
     }
   };
 

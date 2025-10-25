@@ -3141,9 +3141,33 @@ export default function AdminAppointmentsPage() {
                             </p>
                           )}
                           {history.feedback && (
-                            <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                              <p className="text-xs font-semibold text-blue-900 mb-1">Dentist/Staff Note:</p>
-                              <p className="text-sm text-blue-800">{history.feedback}</p>
+                            <div
+                              className={`mt-2 p-3 rounded-md border ${
+                                history.status?.toLowerCase() === 'cancelled'
+                                  ? 'bg-red-50 border-red-200'
+                                  : 'bg-blue-50 border-blue-200'
+                              }`}
+                            >
+                              <p
+                                className={`text-xs font-semibold mb-1 ${
+                                  history.status?.toLowerCase() === 'cancelled'
+                                    ? 'text-red-900'
+                                    : 'text-blue-900'
+                                }`}
+                              >
+                                {history.status?.toLowerCase() === 'cancelled'
+                                  ? 'Reason of Cancellation:'
+                                  : 'Dentist/Staff Note:'}
+                              </p>
+                              <p
+                                className={`text-sm ${
+                                  history.status?.toLowerCase() === 'cancelled'
+                                    ? 'text-red-800'
+                                    : 'text-blue-800'
+                                }`}
+                              >
+                                {history.feedback}
+                              </p>
                             </div>
                           )}
                           {history.changed_by_name && (
